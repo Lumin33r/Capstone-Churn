@@ -1,0 +1,89 @@
+# docker-compose.yml
+# Runs the full Retention Engine stack locally for development and testing
+# Usage: docker-compose up --build
+# George (gvill0576) — Capstone-Churn
+
+version: '3.9'
+
+services:
+
+  # ── Agent Service (LangChain + Bedrock) ─────────────────────────────
+  agent-service:
+    build:
+      context: ./services/agent-service
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - AWS_REGION=us-east-1
+      - QA_EVALUATOR_URL=http://qa-evaluator:8000
+      - CHURN_PREDICTOR_URL=http://churn-predictor:8001
+      - MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0
+    env_file:
+      - .env
+    depends_on:
+      qa-evaluator:
+        condition: service_healthy
+      churn-predictor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - retention-net
+
+  # ── QA Evaluator (Okino's SageMaker wrapper) ─────────────────────────
+  qa-evaluator:
+    build:
+      context: ./services/qa-evaluator-api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - retention-net
+
+  # ── Churn Predictor (Kathleen's SageMaker wrapper) ───────────────────
+  churn-predictor:
+    build:
+      context: ./services/churn-predictor-api
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - retention-net
+
+  # ── Frontend ─────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      agent-service:
+        condition: service_healthy
+    networks:
+      - retention-net
+
+networks:
+  retention-net:
+    driver: bridge

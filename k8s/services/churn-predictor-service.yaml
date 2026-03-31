@@ -1,0 +1,17 @@
+# k8s/services/churn-predictor-service.yaml
+# Internal service — only accessible from within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: churn-predictor-service
+  namespace: retention-engine
+  labels:
+    app: churn-predictor
+spec:
+  selector:
+    app: churn-predictor
+  ports:
+    - protocol: TCP
+      port: 8001
+      targetPort: 8001
+  type: ClusterIP

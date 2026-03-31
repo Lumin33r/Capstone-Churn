@@ -1,0 +1,18 @@
+# k8s/services/qa-evaluator-service.yaml
+# Internal service — only accessible from within the cluster
+# ClusterIP means the agent service can reach it but it is not public
+apiVersion: v1
+kind: Service
+metadata:
+  name: qa-evaluator-service
+  namespace: retention-engine
+  labels:
+    app: qa-evaluator
+spec:
+  selector:
+    app: qa-evaluator
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
