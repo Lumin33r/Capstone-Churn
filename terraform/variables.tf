@@ -16,10 +16,10 @@ variable "team_name" {
 variable "environment" {
   description = "Deployment environment"
   type        = string
-  default     = "staging"
+  default     = "dev"
 
   validation {
-    condition = contain(["dev", "staging", "prod"])
+    condition = contains(["dev", "staging", "prod"], var.environment)
     error_message = "Environment must be dev, staging, or prod."
   }
 }
@@ -27,38 +27,44 @@ variable "environment" {
 variable "s3_bucket_name" {
   description = "S3 bucket for storing transcripts and model artifacts"
   type        = string
-  default     = "retention-engine-data-staging"
+  default     = "retention-engine-transcript-dev"
 }
 
 # Anthropic Claude
-# Best for complex reasoning, analysis, and following detailed instructions
+# Best for complex reasoning, analysis, and following detailed instruction
 variable "agent_model" {
   description = "Foundation model ID for the agent. Change this to upgrade models."
   type = object({
-    id      = string  #
-    display = string  #
+    id      = string  # Bedrock model ID
+    display = string  # Human-readable name for tags/logs
   })
+  # Model supports on‑demand invocation
   default = {
-    id      = "anthropic.claude-sonnet-4-20250514-v1:0" #TODO: review model 
-    display = "Claude Sonnet 4"
+    id      = "anthropic.claude-3-haiku-20240307-v1:0" #TODO: confirm model
+    display = "Claude Haiku 3"
   }
 }
 
-variable "agent_name" {
+variable "agent_sentiment" {
   description = "Name of the Bedrock agent"
   type        = string
-  default     = "senti"
+  default     = "sentiment"
 }
 
 variable "agent_instruction" {
-  description = "System instruction for the agent. Defines its behavior and persona."
+  description = "The system prompt for the Bedrock agent. Defines its behavior and persona required for downstream churn analysis."
   type        = string
-  default     =  ""
+  default     = <<-EOT
+    You are a Sentiment Analyst. Analyze customer transcripts to determine sentiment (Positive, Negative, Neutral) and category.
+    Constraints: 
+      Analysis Scope: Do not invent customer details. Only analyze the text provided.
+      Sentiment Scale: Categorize sentiment strictly as "Positive", "Negative", or "Neutral"
+    Output: Provide a strict JSON object containing sentiment, category, confidence_score, and char_count.
+  EOT
 }
 
 variable "idle_session_ttl" {
   description = "How long agent sessions stay open (seconds). Max 3600."
   type        = number
   default     = 600
-
 }

@@ -13,7 +13,7 @@ load_dotenv()
 app = FastAPI(title="Retention Engine Agent Service")
 
 app.add_middleware(
-    CORSMiddleware,
+    middleware_class=CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,23 +33,23 @@ class ChatResponse(BaseModel):
     retention_recommendation: str | None = None
 
 
-@app.get("/health")
-async def health():
+@app.get(path="/health")
+async def health() -> dict[str, str]:
     return {"status": "healthy", "service": "agent-service"}
 
 
-@app.post("/chat", response_model=ChatResponse)
-async def chat(body: ChatRequest):
+@app.post(path="/chat", response_model=ChatResponse)
+async def chat(body: ChatRequest) -> ChatResponse:
     from chains.retention_agent import get_agent
     try:
         agent = get_agent()
         result = agent.invoke({"input": body.message})
         output = result.get("output", "")
 
-        qa_match    = re.search(r"QA Score:\s*([\d.]+)", output)
-        churn_match = re.search(r"([\d.]+)%", output)
-        risk_match  = re.search(r"Churn Risk:\s*(LOW|MEDIUM|HIGH)", output)
-        rec_match   = re.search(r"Recommendation:\s*(.+?)(?:\n|$)", output)
+        qa_match    = re.search(pattern=r"QA Score:\s*([\d.]+)", string=output)
+        churn_match = re.search(pattern=r"([\d.]+)%", string=output)
+        risk_match  = re.search(pattern=r"Churn Risk:\s*(LOW|MEDIUM|HIGH)", string=output)
+        rec_match   = re.search(pattern=r"Recommendation:\s*(.+?)(?:\n|$)", string=output)
 
         return ChatResponse(
             response=output,
@@ -59,4 +59,4 @@ async def chat(body: ChatRequest):
             retention_recommendation=rec_match.group(1).strip() if rec_match else None,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(object=e))
