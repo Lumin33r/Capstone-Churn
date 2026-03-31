@@ -1,34 +1,167 @@
 # The Retention Engine — Project Roadmap
 
-## Team Roles
-
-Each team member owns a primary lane. Everyone contributes across lanes, but ownership prevents gaps.
-
-| Person | Primary Ownership | Responsibilities |
-|--------|------------------|-----------------|
-| **Troy** | Git & CI/CD | GitHub Projects Kanban board, GitHub Actions workflows (`.github/workflows/`), branch protection, repo setup |
-| **Okino** | ML/Data Science (Endpoint 1) | Dataset identification (transcripts/sentiment), SageMaker QA Evaluator training & deployment, FastAPI wrapper |
-| **Kathleen** | ML/Data Science (Endpoint 2) | Dataset identification (churn), SageMaker Churn Predictor training & deployment, FastAPI wrapper |
-| **George** | Infrastructure & Agentic | Terraform configs, K8s manifests, LangChain/Bedrock integration, agentic harness |
-
-| Shared | Owner |
-|--------|-------|
-| **Frontend Development** | All (TBD who wires final integration) |
-| **Documentation** | All (end of project) |
-| **LLM Usage Docs** | Each member individually |
+**Team:** Troy, Kathleen, Okino, George
 
 ---
 
-## Graded Areas → Lane Mapping
+## Platform Architecture
+
+```
+                            ┌──────────────────────┐
+                            │     USER / BROWSER    │
+                            └──────────┬───────────┘
+                                       │
+                            ┌──────────▼───────────┐
+                            │   Frontend (React /   │
+                            │   Streamlit)          │
+                            │   Chat Interface      │
+                            └──────────┬───────────┘
+                                       │ HTTP
+┌──────────────────────────────────────▼────────────────────────────────────┐
+│                         EKS Cluster (team namespace)                      │
+│                                                                           │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │  Backend Service (FastAPI)                                       │    │
+│  │  ┌────────────────────────────────────────────────────────┐     │    │
+│  │  │  LangChain Agent (Router / Orchestrator)               │     │    │
+│  │  │                                                        │     │    │
+│  │  │  Tools:                                                │     │    │
+│  │  │   • invoke_churn_model  ──▶ Churn Prediction Endpoint  │     │    │
+│  │  │   • invoke_transcript   ──▶ Transcript Analysis Endpt  │     │    │
+│  │  │   • bedrock_chat        ──▶ Bedrock (Claude)           │     │    │
+│  │  └────────────────────────────────────────────────────────┘     │    │
+│  │                                                                  │    │
+│  │  Routes:                                                         │    │
+│  │   POST /chat         ← frontend sends user message              │    │
+│  │   GET  /health       ← K8s liveness probe                       │    │
+│  │   GET  /ready        ← K8s readiness probe                      │    │
+│  └──────────────────────────────────────────────────────────────────┘    │
+│                                                                           │
+│  ┌─────────────────────┐  ┌─────────────────────┐                       │
+│  │ Churn Prediction    │  │ Transcript Analysis  │                       │
+│  │ FastAPI Wrapper     │  │ FastAPI Wrapper      │                       │
+│  │  /predict  /health  │  │  /predict  /health   │                       │
+│  └────────┬────────────┘  └────────┬─────────────┘                       │
+│           │                        │                                      │
+│  ConfigMaps ─ Secrets ─ Namespaces ─ ResourceQuotas                      │
+└───────────┼────────────────────────┼──────────────────────────────────────┘
+            │                        │
+   ┌────────▼────────┐    ┌─────────▼────────┐    ┌──────────────────┐
+   │ SageMaker       │    │ SageMaker        │    │ Amazon Bedrock   │
+   │ Endpoint #1     │    │ Endpoint #2      │    │ Claude 3         │
+   │ Customer Churn  │    │ Transcript       │    │ (Foundation LLM) │
+   │ (XGBoost)       │    │ Classification   │    └──────────────────┘
+   └─────────────────┘    └──────────────────┘
+
+INFRA: Terraform (S3, IAM, SageMaker, EKS references)
+CI/CD: GitHub Actions → Build → Push GHCR → Deploy to EKS
+```
+
+---
+
+## Repo Structure
+
+```
+capstone/
+├── .github/
+│   └── workflows/
+│       ├── ci-backend.yml          # Build + push backend image
+│       ├── ci-frontend.yml         # Build + push frontend image
+│       ├── ci-ml-wrappers.yml      # Build + push ML wrapper images
+│       ├── deploy.yml              # kubectl apply to EKS
+│       └── terraform.yml           # (bonus) tf plan/apply
+├── terraform/
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── providers.tf
+│   └── modules/                    # (bonus) networking, iam, sagemaker
+├── k8s/
+│   ├── namespace.yml
+│   ├── configmap.yml
+│   ├── secrets.yml                 # (template — real values via GH Secrets)
+│   ├── backend-deployment.yml
+│   ├── backend-service.yml
+│   ├── churn-wrapper-deployment.yml
+│   ├── churn-wrapper-service.yml
+│   ├── transcript-wrapper-deployment.yml
+│   ├── transcript-wrapper-service.yml
+│   ├── frontend-deployment.yml
+│   └── frontend-service.yml
+├── backend/
+│   ├── Dockerfile
+│   ├── app/
+│   │   ├── main.py                 # FastAPI app, /chat, /health, /ready
+│   │   ├── agent.py                # LangChain agent + tool definitions
+│   │   ├── tools/
+│   │   │   ├── churn_tool.py       # Calls churn-wrapper /predict
+│   │   │   ├── transcript_tool.py  # Calls transcript-wrapper /predict
+│   │   │   └── bedrock_tool.py     # Bedrock invoke for general chat
+│   │   └── config.py               # Env var config
+│   └── requirements.txt
+├── ml-wrappers/
+│   ├── churn/
+│   │   ├── Dockerfile
+│   │   ├── app.py                  # FastAPI /predict + /health
+│   │   └── requirements.txt
+│   └── transcript/
+│       ├── Dockerfile
+│       ├── app.py                  # FastAPI /predict + /health
+│       └── requirements.txt
+├── sagemaker/
+│   ├── churn/
+│   │   ├── train.py                # Training script or notebook
+│   │   ├── deploy.py               # Endpoint creation script
+│   │   └── data/                   # Sample data / data prep scripts
+│   └── transcript/
+│       ├── train.py
+│       ├── deploy.py
+│       └── data/
+├── frontend/
+│   ├── Dockerfile
+│   ├── src/                        # React or Streamlit app
+│   └── ...
+├── docker-compose.yml              # Local dev: all services together
+├── docs/
+│   ├── architecture.md
+│   ├── setup.md
+│   ├── deployment.md
+│   ├── teardown.md
+│   └── llm-usage/                  # Per-member LLM usage docs
+├── PROJECT_ROADMAP.md
+└── README.md
+```
+
+---
+
+## Owner Matrix
+
+| Component                   | Primary Owner        | Support                         | Key Deliverables                                    |
+| --------------------------- | -------------------- | ------------------------------- | --------------------------------------------------- |
+| GitHub Projects / Kanban    | **Troy**             | All                             | Board setup, task cards, sprint tracking            |
+| GitHub Actions CI/CD        | **Troy**             | George                          | All `.yml` workflows, secrets config                |
+| Dataset identification      | **Kathleen + Okino** | —                               | Churn dataset, transcript dataset                   |
+| SageMaker training + deploy | **Kathleen + Okino** | —                               | `sagemaker/` training scripts, live endpoints       |
+| ML FastAPI wrappers         | **Kathleen + Okino** | Troy (CI)                       | `ml-wrappers/` services with `/predict` + `/health` |
+| Terraform infra             | **George**           | Troy (CI)                       | `terraform/` — IAM, S3, SageMaker resources         |
+| Kubernetes manifests        | **George**           | Troy (deploy wf)                | `k8s/` — all manifests                              |
+| LangChain agent + Bedrock   | **George**           | Kathleen/Okino (tool contracts) | `backend/app/agent.py`, tool definitions            |
+| Backend FastAPI service     | **George**           | All                             | `backend/` — routes, agent wiring                   |
+| Frontend chat UI            | **All**              | —                               | `frontend/` — chat interface                        |
+| Documentation + diagrams    | **All**              | —                               | `docs/`, `README.md`                                |
+
+---
+
+## Graded Areas → Owner Mapping
 
 | # | Graded Area (10% each) | Primary Owner | Supporting |
 |---|----------------------|--------------|------------|
-| 1 | Containers & Dockerfiles | George (writes Dockerfiles for infra), Kathleen/Okino (write Dockerfiles for their services) | Troy (CI builds) |
+| 1 | Containers & Dockerfiles | George (backend, frontend), Kathleen/Okino (ML wrappers) | Troy (CI builds) |
 | 2 | Terraform Provisioning | George | — |
 | 3 | CI/CD with GitHub Actions | Troy | All contribute workflows |
-| 4 | LangChain Agentic Harness | George | Kathleen, Okino (endpoint integration) |
+| 4 | LangChain Agentic Harness | George | Kathleen, Okino (tool contracts) |
 | 5 | Bedrock Chat Agent & Frontend | George (Bedrock/agent), All (frontend) | — |
-| 6 | SageMaker ML Endpoints | Okino (Endpoint 1: QA Evaluator), Kathleen (Endpoint 2: Churn Predictor) | George (integration) |
+| 6 | SageMaker ML Endpoints | Okino (Endpoint 1: QA/Transcript), Kathleen (Endpoint 2: Churn) | George (integration) |
 | 7 | Kubernetes Orchestration | George | Troy (CI/CD deploy steps) |
 | 8 | Team Collaboration & Agile | Troy (board setup), All (participation) | — |
 | 9 | Presentation & Documentation | All | — |
@@ -36,306 +169,331 @@ Each team member owns a primary lane. Everyone contributes across lanes, but own
 
 ---
 
-## Phase Overview
+## Interface Contracts
+
+Define these early so everyone can work in parallel.
+
+### Churn Wrapper → SageMaker Endpoint
 
 ```
-Phase 0: Setup & Planning          ██░░░░░░░░░░░░░░  (Days 1-2)
-Phase 1: Vertical Slice            ████░░░░░░░░░░░░  (Days 3-6)
-Phase 2: Full Build-Out            ████████░░░░░░░░  (Days 7-12)
-Phase 3: Integration & Hardening   ██████████░░░░░░  (Days 13-16)
-Phase 4: Polish & Present          ████████████████  (Days 17-20)
+POST /predict
+Request:  { "features": [0.5, 1.0, 3, 45.2, ...] }
+Response: { "churn_probability": 0.82, "prediction": "churn" }
+
+GET /health
+Response: { "status": "healthy", "endpoint": "churn-endpoint-v1" }
+```
+
+### Transcript Wrapper → SageMaker Endpoint
+
+```
+POST /predict
+Request:  { "text": "I've been waiting for 30 minutes and nobody..." }
+Response: { "category": "complaint", "sentiment": "negative", "confidence": 0.91 }
+
+GET /health
+Response: { "status": "healthy", "endpoint": "transcript-endpoint-v1" }
+```
+
+### Backend /chat → Frontend
+
+```
+POST /chat
+Request:  { "message": "What's the churn risk for customer 4521?" }
+Response: { "response": "Based on the model prediction, customer 4521 has a 82% churn probability..." }
+
+GET /health
+Response: { "status": "healthy", "agent": "ready", "tools": ["churn", "transcript", "bedrock"] }
 ```
 
 ---
 
-## Phase 0 — Setup & Planning (Days 1–2)
+## LangChain Agent Design
 
-**Goal:** Repo structure, tooling, Kanban board, and team alignment. Nothing is built yet — everything is scaffolded.
+```python
+# Simplified agent structure — George owns, Kathleen/Okino define tool I/O
+
+tools = [
+    # Tool 1: Churn prediction
+    #   Input: customer feature vector
+    #   Action: POST to churn-wrapper-service:8000/predict
+    #   Output: churn probability + label
+
+    # Tool 2: Transcript analysis
+    #   Input: raw text from service call
+    #   Action: POST to transcript-wrapper-service:8000/predict
+    #   Output: category + sentiment + confidence
+
+    # Tool 3: Bedrock general chat
+    #   Input: user message (when no tool needed)
+    #   Action: bedrock invoke_model (Claude 3)
+    #   Output: conversational response
+]
+
+# Agent routes based on user intent:
+#   "Will customer X churn?"     → churn tool
+#   "Analyze this transcript..." → transcript tool
+#   "What can you help with?"    → bedrock general chat
+#   Complex queries              → chain multiple tools
+
+# Non-trivial agentic behavior:
+#   If churn_probability > 0.7 → auto-generate retention offer via Bedrock
+#   Multi-step: transcript → QA score → combine with account data → churn → retention offer
+```
+
+---
+
+## CI/CD Pipeline Overview
+
+```
+Feature Branch Push          Merge to Main
+────────────────────         ─────────────────────────────
+
+  ┌──────────────┐             ┌──────────────┐
+  │ Lint + Test  │             │ Build Images │
+  └──────┬───────┘             └──────┬───────┘
+         │                            │
+         ▼                     ┌──────▼───────┐
+    PR Status Check            │ Push to GHCR │
+                               └──────┬───────┘
+                                      │
+                               ┌──────▼───────┐
+                               │ kubectl apply│
+                               │ -f k8s/      │
+                               └──────┬───────┘
+                                      │
+                               ┌──────▼───────┐
+                               │ Health Check │
+                               │ (verify pods)│
+                               └──────────────┘
+```
+
+**Workflows (Troy owns):**
+
+| File                 | Trigger                  | What It Does                           |
+| -------------------- | ------------------------ | -------------------------------------- |
+| `ci-backend.yml`     | push to `backend/**`     | Build + push backend image             |
+| `ci-ml-wrappers.yml` | push to `ml-wrappers/**` | Build + push both wrapper images       |
+| `ci-frontend.yml`    | push to `frontend/**`    | Build + push frontend image            |
+| `deploy.yml`         | merge to `main`          | `kubectl apply -f k8s/` + health check |
+| `terraform.yml`      | (bonus) manual trigger   | `tf plan` on PR, `tf apply` on merge   |
+
+---
+
+## Kubernetes Layout
+
+```
+Namespace: team-retention-engine
+│
+├── backend-deployment        (2 replicas)
+│   └── backend-service       (ClusterIP or LoadBalancer)
+│
+├── churn-wrapper-deployment  (1 replica)
+│   └── churn-wrapper-service (ClusterIP)
+│
+├── transcript-wrapper-deployment (1 replica)
+│   └── transcript-wrapper-service (ClusterIP)
+│
+├── frontend-deployment       (1 replica)
+│   └── frontend-service      (LoadBalancer → public)
+│
+├── configmap                 (endpoint URLs, region, model names)
+└── secret                    (AWS creds — injected via GH Actions)
+```
+
+All inter-service calls stay **inside the cluster** (ClusterIP). Only the frontend service gets a LoadBalancer for public access. The backend talks to ML wrappers via K8s DNS (`churn-wrapper-service.team-retention-engine.svc.cluster.local:8000`).
+
+---
+
+## Phase Overview
+
+```
+Phase 0: Setup & Scaffolding       ██░░░░░░░░░░░░░░  (Days 1-2)
+Phase 1: Core Services             ████░░░░░░░░░░░░  (Days 3-5)
+Phase 2: Infra, Deploy & CI/CD     ██████░░░░░░░░░░  (Days 5-7)
+Phase 3: Frontend, Polish & Docs   ████████░░░░░░░░  (Days 7-9)
+```
+
+---
+
+## Phase 0 — Setup & Scaffolding (Days 1–2)
+
+**Goal:** Repo structure, Kanban board, API contracts agreed, one vertical slice working locally.
 
 ### Troy — Git & CI/CD Setup
 - [ ] Set up GitHub Projects Kanban board with columns: `Backlog`, `In Progress`, `In Review`, `Done`
-- [ ] Create all tasks from this roadmap as GitHub Issues and assign owners
+- [ ] Create tasks from this roadmap as GitHub Issues and assign owners
 - [ ] Set branch protection on `main` (require PR + 1 approval)
 - [ ] Agree on branch naming convention with team (e.g., `feat/<owner>-<description>`, `fix/...`)
 - [ ] Scaffold `.github/workflows/` with placeholder workflow files
+- [ ] Create `docker-compose.yml` skeleton for local dev
 
-### All Team Members
-- [ ] Each member documents their LLM setup (which tools, how they're using them) in `docs/llm-usage/`
-
-### George — Infrastructure & Agentic
-- [ ] Scaffold `terraform/` directory structure:
-  ```
-  terraform/
-  ├── main.tf
-  ├── variables.tf
-  ├── outputs.tf
-  ├── providers.tf
-  ├── backend.tf          # S3 remote state (bonus)
-  └── modules/            # (bonus) networking, compute, sagemaker
-  ```
+### George — Infrastructure & Backend Scaffold
+- [ ] Scaffold `terraform/` directory (main.tf, variables.tf, outputs.tf, providers.tf)
 - [ ] Identify which AWS resources are pre-existing (shared VPC, EKS cluster, IAM roles) vs. need provisioning
-- [ ] Scaffold `k8s/` directory structure:
-  ```
-  k8s/
-  ├── namespace.yaml
-  ├── configmaps/
-  ├── secrets/
-  ├── deployments/
-  └── services/
-  ```
-- [ ] Create initial `docker-compose.yml` for local dev
-- [ ] Scaffold `services/agent-service/`:
-  ```
-  services/
-  └── agent-service/
-      ├── app.py           # FastAPI + LangChain
-      ├── chains/
-      ├── tools/
-      ├── Dockerfile
-      └── requirements.txt
-  ```
+- [ ] Scaffold `k8s/` with namespace + configmap templates
+- [ ] Scaffold `backend/` with FastAPI hello world (`/health`, `/ready`, `/chat` stubs)
+- [ ] Write first Dockerfile for backend
 - [ ] Verify Bedrock model access in `us-east-1`
-- [ ] Decide: Minikube for local dev → EKS for production? Or EKS only?
 
-### Okino — ML Endpoint 1 (QA Evaluator)
+### Okino — ML Endpoint 1 (Transcript/QA Evaluator)
 - [ ] Download sentiment dataset from Kaggle ("Customer Support on Twitter" or "Amazon Reviews")
-- [ ] Scaffold `sagemaker/endpoint1-qa-evaluator/`:
-  ```
-  sagemaker/endpoint1-qa-evaluator/
-  ├── train.py (or notebook)
-  └── deploy.py
-  services/qa-evaluator-api/
-  ├── app.py           # FastAPI
-  ├── Dockerfile
-  └── requirements.txt
-  ```
+- [ ] Scaffold `sagemaker/transcript/` with train.py notebook + data/ directory
+- [ ] Scaffold `ml-wrappers/transcript/` with FastAPI stub (app.py, Dockerfile, requirements.txt)
 - [ ] Begin data exploration and preprocessing
 
 ### Kathleen — ML Endpoint 2 (Churn Predictor)
 - [ ] Download "Telco Customer Churn" (IBM) dataset from Kaggle
-- [ ] Scaffold `sagemaker/endpoint2-churn-predictor/`:
-  ```
-  sagemaker/endpoint2-churn-predictor/
-  ├── train.py (or notebook)
-  └── deploy.py
-  services/churn-predictor-api/
-  ├── app.py           # FastAPI
-  ├── Dockerfile
-  └── requirements.txt
-  ```
+- [ ] Scaffold `sagemaker/churn/` with train.py notebook + data/ directory
+- [ ] Scaffold `ml-wrappers/churn/` with FastAPI stub (app.py, Dockerfile, requirements.txt)
 - [ ] Begin data exploration and preprocessing
 
-### Kathleen & Okino (Together)
-- [ ] Create synthetic Customer ID mapping between the two datasets
+### All — Day 1 Sync
+- [ ] Agree on API contracts (see Interface Contracts section above)
+- [ ] Each member documents their LLM setup in `docs/llm-usage/`
 - [ ] Decide frontend framework: React (more polished, bonus points) or Streamlit (faster to build)
-- [ ] Scaffold `frontend/` directory
 
-### Repo Structure After Phase 0
-```
-Capstone-Churn/
-├── .github/
-│   └── workflows/           # CI/CD pipelines
-├── terraform/               # IaC
-├── k8s/                     # Kubernetes manifests
-├── sagemaker/               # Training notebooks & deploy scripts
-├── services/
-│   ├── qa-evaluator-api/    # FastAPI wrapper for Endpoint 1
-│   ├── churn-predictor-api/ # FastAPI wrapper for Endpoint 2
-│   └── agent-service/       # LangChain orchestration service
-├── frontend/                # Chat UI
-├── docs/
-│   ├── architecture/        # Diagrams
-│   ├── llm-usage/           # LLM documentation per member
-│   └── setup.md             # Reproduction steps
-├── docker-compose.yml
-├── PROJECT_ROADMAP.md
-└── README.md
-```
+### Milestone ✓
+> Every team member can run `docker-compose up` and hit the backend `/health` endpoint.
 
 ---
 
-## Phase 1 — Vertical Slice (Days 3–6)
+## Phase 1 — Core Services (Days 3–5)
 
-**Goal:** One end-to-end path working: a single ML endpoint → FastAPI wrapper → LangChain agent can call it → basic chat UI can trigger it. This proves the architecture before building everything out.
+**Goal:** ML endpoints live, agent wired with tools, CI green. The core pipeline works locally.
 
-### George — Terraform & K8s Foundation
-- [ ] Write Terraform for core resources:
-  - S3 bucket (audio/data storage)
+### Troy — CI/CD Pipelines
+- [ ] CI workflow: build + push backend image to GHCR
+- [ ] CI workflow: build + push ML wrapper images to GHCR
+- [ ] CI workflow: build + push frontend image to GHCR
+- [ ] Add verification step (health check) to each workflow
+- [ ] Use `docker/build-push-action` + GitHub Secrets for registry credentials
+
+### Okino — QA/Transcript Evaluator (Train + Deploy)
+- [ ] **Train Endpoint 1 in SageMaker:**
+  - Preprocess sentiment dataset (tokenize, label encode)
+  - Train DistilBERT/RoBERTa text classifier
+  - Deploy to SageMaker endpoint
+  - Verify: `aws sagemaker describe-endpoint --endpoint-name transcript-endpoint-v1`
+- [ ] **FastAPI wrapper (`ml-wrappers/transcript/`):**
+  - `POST /predict` — accepts `{"text": "..."}`, returns `{"category": "...", "sentiment": "...", "confidence": 0.91}`
+  - `GET /health` — returns `{"status": "healthy", "endpoint": "transcript-endpoint-v1"}`
+  - Invoke SageMaker endpoint from FastAPI using `boto3`
+- [ ] Write Dockerfile (multi-stage build, slim base, `.dockerignore`, health check)
+- [ ] Test: `curl localhost:8000/predict -d '{"text": "I am very upset"}'`
+
+### Kathleen — Churn Predictor (Train + Deploy)
+- [ ] **Train Endpoint 2 in SageMaker:**
+  - Preprocess Telco Churn dataset (encode categoricals, scale numerics)
+  - Train XGBoost/LightGBM model
+  - Deploy to SageMaker endpoint
+  - Verify: `aws sagemaker describe-endpoint --endpoint-name churn-endpoint-v1`
+- [ ] **FastAPI wrapper (`ml-wrappers/churn/`):**
+  - `POST /predict` — accepts `{"features": [0.5, 1.0, 3, 45.2, ...]}`, returns `{"churn_probability": 0.82, "prediction": "churn"}`
+  - `GET /health` — returns `{"status": "healthy", "endpoint": "churn-endpoint-v1"}`
+  - Invoke SageMaker endpoint from FastAPI using `boto3`
+- [ ] Write Dockerfile (multi-stage build, slim base, `.dockerignore`, health check)
+- [ ] Test: `curl localhost:8000/predict -d '{"features": [...]}'`
+
+### George — LangChain Agent + Backend
+- [ ] **Terraform apply** — provision core cloud resources:
+  - S3 bucket (data storage)
   - IAM roles for SageMaker execution and Bedrock access
   - Reference existing VPC/EKS (use `data` sources or `terraform import`)
-- [ ] `terraform init` + `plan` + `apply` — document the lifecycle in `docs/setup.md`
+- [ ] Document lifecycle: `terraform init` → `plan` → `apply` in `docs/setup.md`
 - [ ] Set up remote state with S3 + DynamoDB locking (bonus)
-- [ ] Write initial K8s manifests for the QA evaluator service:
-  - `namespace.yaml` (use team name, e.g., `retention-engine`)
-  - `deployment.yaml` with health probes (readiness + liveness)
-  - `service.yaml`
-  - `configmap.yaml` for env vars
-- [ ] Deploy to Minikube, verify `/health` responds
+- [ ] **Write LangChain agent** with tool definitions:
+  - `churn_tool` → calls churn-wrapper `/predict`
+  - `transcript_tool` → calls transcript-wrapper `/predict`
+  - `bedrock_tool` → Bedrock invoke for general chat
+- [ ] Wire agent into backend `/chat` route
+- [ ] Write K8s deployments + services for all containers
 
-### George — LangChain Agent (First Tool)
-- [ ] Create a LangChain `Tool` that calls the QA Evaluator `/predict` endpoint
-- [ ] Wire it into a basic agent with Bedrock as the LLM backbone
-- [ ] Test: agent receives "Analyze this call transcript: ..." → invokes QA tool → returns result
-
-### Okino — QA Evaluator Endpoint
-- [ ] **Train and deploy Endpoint 1:**
-  - Preprocess sentiment dataset (tokenize, label encode)
-  - Train DistilBERT/RoBERTa text classifier in SageMaker notebook
-  - Deploy to SageMaker endpoint
-  - Verify: `aws sagemaker describe-endpoint --endpoint-name qa-evaluator`
-- [ ] **FastAPI wrapper for Endpoint 1:**
-  - `POST /predict` — accepts `{"text": "..."}`, returns `{"qa_score": 7, "sentiment": "Frustrated"}`
-  - `GET /health` — returns `{"status": "healthy"}`
-  - Invoke SageMaker endpoint from FastAPI using `boto3`
-- [ ] Write Dockerfile for `qa-evaluator-api` (multi-stage build, slim base)
-  - `.dockerignore` for optimization, health check in Dockerfile
-- [ ] Test end-to-end: `curl localhost:8000/predict -d '{"text": "I am very upset"}'`
-
-### Kathleen — Churn Predictor Endpoint (Parallel with Okino)
-- [ ] **Begin training Endpoint 2** (will complete in Phase 2, but start data prep and initial training now)
-  - Preprocess Telco Churn dataset (encode categoricals, scale numerics)
-  - Begin XGBoost/LightGBM model training in SageMaker notebook
-
-### Troy — First CI/CD Pipeline
-- [ ] **First GitHub Actions workflow:**
-  - On push to `main`: build Docker image → push to GHCR or DockerHub
-  - Use `docker/build-push-action`
-  - Use GitHub Secrets for registry credentials
-  - Add a health check step (curl the built container)
-
-### Frontend — Basic Chat (All, TBD wiring)
-- [ ] Minimal Streamlit or React app with a text input and response display
-- [ ] Connects to the agent service API
-- [ ] Verify: type a message → get a response that includes QA analysis
-
-### Milestone Check ✓
-> Can a user type a call transcript into the chat UI, have the LangChain agent analyze it via the QA Evaluator endpoint, and return a sentiment score? If yes, Phase 1 is complete.
+### Milestone ✓
+> From local, you can POST to `/chat` with "Will this customer churn?" and the agent calls the churn endpoint and returns a response.
 
 ---
 
-## Phase 2 — Full Build-Out (Days 7–12)
+## Phase 2 — Infrastructure, Deploy & CI/CD (Days 5–7)
 
-**Goal:** All services built, all endpoints live, full agentic pipeline working. This is the heavy lifting phase.
+**Goal:** Everything running on Kubernetes, CI/CD deploys automatically, full agentic pipeline working.
 
-### George — Infrastructure Expansion
-- [ ] Add Terraform resources for:
-  - SageMaker endpoint configurations (if not manually deployed)
-  - Any additional S3 buckets, IAM policies
-  - ECR repositories (if using ECR instead of GHCR)
-- [ ] Modularize Terraform (bonus): separate `modules/networking`, `modules/compute`, `modules/sagemaker`
-- [ ] Document all outputs: endpoint URLs, bucket names, role ARNs
-- [ ] Write `terraform destroy` teardown instructions
+### Troy — Deploy Pipeline
+- [ ] Deploy workflow: `kubectl apply -f k8s/` triggered on merge to main
+- [ ] Add rollback step to deploy workflow (bonus)
+- [ ] Set up branch-based targeting: staging vs prod (bonus)
+- [ ] Add verification steps:
+  - Health check after deployment
+  - `kubectl rollout status deployment/<name>`
+  - Smoke test: curl `/health` endpoints
 
-### George — K8s Full Stack & Dockerfiles
-- [ ] Write Dockerfiles for `agent-service` and `frontend` (multi-stage builds + slim bases + health checks)
-- [ ] Update `docker-compose.yml` for full local stack (all 4 services)
-- [ ] Write K8s manifests for all services:
-  - Deployments with health probes for each service
-  - Services (ClusterIP for internal, LoadBalancer for frontend)
-  - ConfigMaps for non-sensitive config
-  - Secrets for AWS credentials, API keys
-- [ ] Add resource management (bonus):
-  - `ResourceQuota` and `LimitRange` per namespace
-  - Rolling update strategy in deployments
-- [ ] Deploy full stack to Minikube, test service-to-service communication
-
-### Kathleen — Churn Predictor Endpoint (Complete)
-- [ ] **Finish Endpoint 2 (Churn Predictor) — train and deploy:**
-  - Complete XGBoost/LightGBM model training in SageMaker
-  - Deploy to SageMaker endpoint
-- [ ] **FastAPI wrapper for Endpoint 2:**
-  - `POST /predict` — accepts `{"qa_score": 7, "contract_length": 12, "monthly_bill": 89.50, "support_calls": 4}`
-  - Returns `{"churn_probability": 0.82, "risk_level": "HIGH"}`
-  - `GET /health`
-- [ ] Write Dockerfile for `churn-predictor-api` (multi-stage build, slim base)
-
-### Kathleen & Okino — Cross-Model Integration
-- [ ] Create the Customer ID mapping logic
-- [ ] Test pipeline: transcript → QA score → combine with account data → churn probability
-- [ ] Add production hardening (bonus):
+### Kathleen & Okino — ML Hardening
+- [ ] Create the Customer ID mapping logic between datasets
+- [ ] Test cross-model pipeline: transcript → QA score → combine with account data → churn probability
+- [ ] Harden ML wrappers (bonus):
   - Retry logic on SageMaker invocations
   - Error handling and fallback responses
   - Model versioning
+- [ ] Test endpoints under load, verify CloudWatch logs
 
-### George — Full Agentic Pipeline
-- [ ] **Full LangChain agent with multiple tools:**
-  - Tool 1: `analyze_call` → calls QA Evaluator endpoint (Okino's service)
-  - Tool 2: `predict_churn` → calls Churn Predictor endpoint (Kathleen's service)
-  - Tool 3: `get_customer_info` → retrieves account metadata (can be mocked or from a simple DB)
-  - Implement conditional routing: if churn risk > 0.7, trigger retention recommendation
-- [ ] **Multi-step agentic workflow:**
-  - Agent receives transcript → calls QA tool → gets score → calls churn tool with score + account data → if high risk, asks Bedrock to generate retention offer
+### George — K8s Deploy & Agentic Pipeline
+- [ ] Deploy full stack to Minikube/EKS: `kubectl apply -f k8s/`
+- [ ] Add ConfigMaps + Secrets for env vars (endpoint URLs, AWS creds)
+- [ ] Add health probes to all deployments (liveness + readiness)
+- [ ] Verify Bedrock access from inside cluster
+- [ ] **Full multi-step agentic workflow:**
+  - Agent receives transcript → calls transcript tool → gets sentiment/QA score → calls churn tool with score + account data → if churn risk > 0.7, asks Bedrock to generate retention offer
   - This satisfies: "non-trivial agentic behavior" + "multi-step reasoning" + "tool use"
-- [ ] **LangGraph workflow (bonus):**
-  - Model the above as a state graph with conditional edges
-- [ ] **LangSmith integration (bonus):**
-  - Enable `LANGCHAIN_TRACING_V2=true`
-  - Document trace examples in `docs/`
+- [ ] Add Terraform resources for SageMaker endpoint configs, additional IAM policies
+- [ ] Modularize Terraform (bonus): `modules/networking`, `modules/compute`, `modules/sagemaker`
+- [ ] Add resource management (bonus): `ResourceQuota` + `LimitRange` per namespace
+- [ ] LangGraph workflow (bonus): model pipeline as state graph with conditional edges
+- [ ] LangSmith integration (bonus): `LANGCHAIN_TRACING_V2=true`
 
-### Frontend — Manager's Command Center (All, TBD wiring)
+### Milestone ✓
+> Push to `main` triggers build → push → deploy. All pods healthy in cluster. Chat works via LoadBalancer URL.
+
+---
+
+## Phase 3 — Frontend, Polish & Docs (Days 7–9)
+
+**Goal:** Chat UI live, full pipeline working, docs complete, demo-ready.
+
+### Frontend — Manager's Command Center (All)
 - [ ] Chat interface for interacting with the agent
 - [ ] Display: QA Score, Sentiment, Churn Probability, Retention Recommendation
 - [ ] "High Risk" leaderboard or dashboard panel
 - [ ] Conversation memory / context persistence (bonus)
 - [ ] Polish with Tailwind/MUI (bonus)
 
-### Troy — CI/CD Expansion
-- [ ] **Expand GitHub Actions:**
-  - Workflow per service: build → test → push to registry
-  - Infrastructure workflow: `terraform plan` on PR, `terraform apply` on merge to main (bonus)
-  - Deployment workflow: `kubectl apply` to EKS after image push
-  - Branch-based targeting (bonus): deploy to staging on `develop`, production on `main`
-- [ ] Add verification steps:
-  - Health check after deployment
-  - Rollout status check: `kubectl rollout status deployment/<name>`
-  - Smoke test: curl the `/health` endpoints
+### Troy — Final CI/CD & Collaboration
+- [ ] Wire frontend CI/CD
+- [ ] Ensure all workflows pass on main
+- [ ] Final Kanban cleanup: all cards resolved
+- [ ] Write docs: CI/CD setup guide, teardown steps
 
----
+### Kathleen & Okino — ML Docs & Bonus
+- [ ] Verify both SageMaker endpoints are stable and responding
+- [ ] Ensure model invocations work from inside K8s pods
+- [ ] Add 3rd endpoint or model versioning (bonus)
+- [ ] Write docs: ML approach, data decisions, LLM usage log
 
-## Phase 3 — Integration & Hardening (Days 13–16)
-
-**Goal:** Everything deployed to EKS, CI/CD fully automated, cross-service communication verified, edge cases handled.
-
-### All — Integration Testing
-- [ ] Deploy full stack to EKS cluster
-- [ ] Test end-to-end flow from frontend through all services
-- [ ] Verify all health probes are passing: `kubectl get pods -n retention-engine`
-- [ ] Test CI/CD: push a change → watch it build → deploy → verify
-- [ ] Fix any networking/CORS/DNS issues between services
-
-### George — Infrastructure Hardening
+### George — Infrastructure Finalization
 - [ ] Verify all Terraform state is clean and reproducible
 - [ ] Test full lifecycle: `destroy` → `init` → `plan` → `apply`
 - [ ] Ensure no hardcoded credentials anywhere
 - [ ] Add HPA (Horizontal Pod Autoscaler) for high-traffic services (bonus)
-- [ ] Add persistent storage if needed (bonus)
-- [ ] Verify all containers use env vars, not hardcoded secrets
 - [ ] Test: `kubectl exec <pod> -- curl localhost:8000/health` for each service
+- [ ] Write docs: architecture diagram, infra setup, deployment steps, teardown
 
-### Kathleen & Okino — ML Endpoint Validation
-- [ ] Verify both SageMaker endpoints are stable and responding
-- [ ] Load test the FastAPI wrappers
-- [ ] Ensure model invocations work from inside K8s pods
-
-### George — Agentic & Frontend Validation
-- [ ] Verify Bedrock access from inside the cluster
-- [ ] Test full agent workflow from the deployed frontend
-- [ ] Verify conversation memory works across sessions
-
-### Bonus Integrations
-- [ ] Amazon Transcribe pipeline: S3 audio upload → Transcribe → feed transcript to agent (bonus)
-- [ ] Amazon Polly: text-to-speech for agent responses (bonus)
-
----
-
-## Phase 4 — Polish & Present (Days 17–20)
-
-**Goal:** Documentation complete, presentation rehearsed, everything demo-ready.
+### Bonus Integrations (Anyone)
+- [ ] Amazon Transcribe pipeline: S3 audio upload → Transcribe → feed transcript to agent
+- [ ] Amazon Polly: text-to-speech for agent responses
 
 ### Documentation (All Members)
 - [ ] **README.md** — project overview, team members, quick start
 - [ ] **docs/setup.md** — full reproduction steps (clone → provision → deploy → test → teardown)
-- [ ] **docs/architecture/** — at least one architecture diagram:
+- [ ] **docs/architecture.md** — at least one architecture diagram:
   - System-level diagram showing all services and data flow
   - Deployment pipeline diagram
   - (Bonus) C4 diagrams, sequence diagrams
@@ -346,8 +504,7 @@ Capstone-Churn/
   - (Bonus) comparison of LLM-generated vs hand-written code
 
 ### Presentation Prep
-- [ ] Assign presentation sections — each member covers their area
-- [ ] Suggested structure:
+- [ ] Assign presentation sections — each member covers their area:
   1. **Business Problem & Architecture Overview** — any member (2 min)
   2. **Infrastructure & Terraform** — George (3 min)
   3. **CI/CD & Git Workflow** — Troy (3 min)
@@ -366,42 +523,67 @@ Capstone-Churn/
 - [ ] All services healthy on EKS
 - [ ] CI/CD pipelines green
 
+### Milestone ✓
+> Demo-ready. Clone → follow docs → full deployment reproducible.
+
+---
+
+## Parallel Work Strategy
+
+The key to speed: **everyone works simultaneously from Day 1**.
+
+```
+                    Troy         Kathleen/Okino       George
+                    ────         ──────────────       ──────
+Week 1 Focus:       CI/CD        ML Models            Infra + Agent
+                    Repo         Datasets             Terraform
+                    Workflows    SageMaker Train      K8s Manifests
+                                 FastAPI Wrappers     LangChain
+
+Week 2 Focus:       Frontend     Frontend             Frontend
+                    Final CI     Hardening             Deploy to EKS
+                    Docs         Docs                  Docs
+```
+
+**Integration points** (where people need to sync):
+
+1. **API contracts** — agree on request/response shapes before coding (Day 1)
+2. **Docker image names** — Troy needs image paths for CI, George needs them for K8s
+3. **Endpoint URLs** — Kathleen/Okino provide SageMaker endpoint names, George puts them in ConfigMaps
+4. **Secrets** — Troy sets up GH Secrets, George references them in K8s Secrets
+
 ---
 
 ## Bonus Points Checklist
 
-Quick reference for all bonus opportunities across the rubric:
-
-| Area | Bonus Item | Difficulty |
-|------|-----------|------------|
-| Containers | Alpine/slim bases, health checks, `.dockerignore` | Low |
-| Terraform | Remote state with S3/DynamoDB | Medium |
-| Terraform | Modular structure (separate modules) | Medium |
-| CI/CD | Separate infra vs app workflows | Medium |
-| CI/CD | Branch targeting, rollback, multi-workflow chaining | Medium |
-| LangChain | LangGraph workflows | Medium |
-| LangChain | LangSmith observability | Low |
-| Bedrock/Chat | Conversation memory persistence | Medium |
-| Bedrock/Chat | Polished UI (Tailwind/MUI) | Medium |
-| SageMaker | Third endpoint or model versioning | High |
-| SageMaker | Retry logic, error handling, fallback | Medium |
-| K8s | ResourceQuota + LimitRange | Low |
-| K8s | HPA, persistent storage, rolling updates | Medium |
-| Collaboration | Sprint artifacts, retro notes, standup docs | Low |
-| Collaboration | Code review comments on PRs | Low |
-| Presentation | C4/sequence diagrams | Medium |
-| Presentation | Present early | Low |
-| LLM Usage | Compare LLM vs hand-written code | Medium |
-| LLM Usage | Document prompt engineering techniques | Low |
-| Extra | AWS Transcribe/Polly integration | High |
-| Extra | Blog articles, MkDocs, video series | High |
-| Extra | Portfolio page integration | High |
+| Area | Bonus Item | Difficulty | Owner |
+|------|-----------|------------|-------|
+| Containers | Alpine/slim bases, health checks, `.dockerignore` | Low | All |
+| Terraform | Remote state with S3/DynamoDB | Low | George |
+| Terraform | Modular structure (separate modules) | Medium | George |
+| CI/CD | Separate CI workflows per service | Low | Troy (already in plan) |
+| CI/CD | Branch targeting, rollback, multi-workflow chaining | Medium | Troy |
+| LangChain | LangGraph workflows | Medium | George |
+| LangChain | LangSmith observability | Medium | George |
+| Bedrock/Chat | Conversation memory persistence | Medium | George + frontend dev |
+| Bedrock/Chat | Polished UI (Tailwind/MUI) | Medium | Frontend dev |
+| SageMaker | Third endpoint or model versioning | Medium | Kathleen/Okino |
+| SageMaker | Retry logic, error handling, fallback | Medium | Kathleen/Okino |
+| K8s | ResourceQuota + LimitRange | Low | George |
+| K8s | HPA, persistent storage, rolling updates | Medium | George |
+| Collaboration | Sprint artifacts, retro notes, standup docs | Low | Troy + All |
+| Collaboration | Code review comments on PRs | Low | All |
+| Presentation | C4/sequence diagrams | Medium | All |
+| Presentation | Present early | Low | All |
+| LLM Usage | Compare LLM vs hand-written code | Medium | All |
+| LLM Usage | Document prompt engineering techniques | Low | All |
+| Extra | AWS Transcribe/Polly integration | Medium | Anyone |
+| Extra | Blog articles, MkDocs, video series | High | Anyone |
+| Extra | Portfolio page integration | High | Anyone |
 
 ---
 
 ## Daily Standup Template
-
-Use this in your team channel or standup meetings:
 
 ```
 **Name:**
@@ -417,8 +599,9 @@ Use this in your team channel or standup meetings:
 
 1. **Vertical slice first** — get one path working end-to-end before expanding
 2. **Parallel lanes** — infrastructure and application work happen simultaneously
-3. **Feature branches always** — never commit directly to `main`
-4. **Document as you go** — don't leave it all for Phase 4
-5. **Log your LLM usage** — it's 10% of the grade, treat it seriously
-6. **Test locally before deploying** — Docker Compose and Minikube first, EKS second
-7. **Reuse prior work** — FastAPI services, K8s manifests, Terraform configs from earlier modules are fair game
+3. **API contracts on Day 1** — agree on request/response shapes so everyone can work independently
+4. **Feature branches always** — never commit directly to `main`
+5. **Document as you go** — don't leave it all for Phase 3
+6. **Log your LLM usage** — it's 10% of the grade, treat it seriously
+7. **Test locally before deploying** — Docker Compose and Minikube first, EKS second
+8. **Reuse prior work** — FastAPI services, K8s manifests, Terraform configs from earlier modules are fair game
