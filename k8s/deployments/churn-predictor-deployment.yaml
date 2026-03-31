@@ -1,0 +1,54 @@
+# k8s/deployments/churn-predictor-deployment.yaml
+# Runs Kathleen's Churn Predictor SageMaker wrapper service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: churn-predictor
+  namespace: retention-engine
+  labels:
+    app: churn-predictor
+    team: retention-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: churn-predictor
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: churn-predictor
+    spec:
+      containers:
+        - name: churn-predictor
+          image: ghcr.io/lumin33r/churn-predictor:latest
+          ports:
+            - containerPort: 8001
+          envFrom:
+            - secretRef:
+                name: aws-secrets
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
