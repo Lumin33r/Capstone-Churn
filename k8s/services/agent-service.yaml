@@ -1,0 +1,19 @@
+# k8s/services/agent-service.yaml
+# Exposes the agent container so the frontend can reach it
+# LoadBalancer type: AWS creates an external load balancer with a public URL
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service
+  namespace: retention-engine
+  labels:
+    app: agent-service
+    team: retention-engine
+spec:
+  selector:
+    app: agent-service
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  type: LoadBalancer

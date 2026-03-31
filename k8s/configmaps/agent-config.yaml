@@ -1,0 +1,15 @@
+# k8s/configmaps/agent-config.yaml
+# Non-sensitive config values for the agent service
+# NEVER put passwords, API keys, or AWS credentials here
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agent-config
+  namespace: retention-engine
+data:
+  AWS_REGION: "us-east-1"
+  QA_EVALUATOR_URL: "http://qa-evaluator-service:8000"
+  CHURN_PREDICTOR_URL: "http://churn-predictor-service:8001"
+  LOG_LEVEL: "INFO"
+  MODEL_ID: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  

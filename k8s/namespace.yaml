@@ -1,0 +1,10 @@
+# k8s/namespace.yaml
+# Creates an isolated space in Kubernetes for all team services
+# Using team name as namespace to avoid conflicts on shared EKS cluster
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: retention-engine
+  labels:
+    team: retention-engine
+    environment: staging
