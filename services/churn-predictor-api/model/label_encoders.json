@@ -1,0 +1,50 @@
+{
+  "plan_tier": {
+    "Basic_25": 0,
+    "Premium_Gig": 1,
+    "Standard_100": 2
+  },
+  "contract_type": {
+    "12_Month": 0,
+    "24_Month": 1,
+    "Month_to_Month": 2
+  },
+  "income_bracket": {
+    "High": 0,
+    "Low": 1,
+    "Middle": 2,
+    "Upper_Middle": 3
+  },
+  "home_ownership": {
+    "Other": 0,
+    "Own": 1,
+    "Rent": 2
+  },
+  "work_from_home_flag": {
+    "False": 0,
+    "True": 1
+  },
+  "education_level": {
+    "College": 0,
+    "Graduate": 1,
+    "HS": 2,
+    "Professional": 3
+  },
+  "life_stage": {
+    "Empty_Nest": 0,
+    "Established_Family": 1,
+    "Senior": 2,
+    "Single": 3,
+    "Young_Family": 4
+  },
+  "home_type": {
+    "Apartment": 0,
+    "Condo": 1,
+    "Single_Family": 2,
+    "Townhouse": 3
+  },
+  "fiber_availability": {
+    "False": 0,
+    "True": 1
+  }
+}
