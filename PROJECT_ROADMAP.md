@@ -307,16 +307,19 @@ All inter-service calls stay **inside the cluster** (ClusterIP). Only the fronte
 
 ## Phase Overview
 
+**Presentation Date: April 23, 2026**
+
 ```
-Phase 0: Setup & Scaffolding       ██░░░░░░░░░░░░░░  (Days 1-2)
-Phase 1: Core Services             ████░░░░░░░░░░░░  (Days 3-5)
-Phase 2: Infra, Deploy & CI/CD     ██████░░░░░░░░░░  (Days 5-7)
-Phase 3: Frontend, Polish & Docs   ████████░░░░░░░░  (Days 7-9)
+Phase 0: Setup & Scaffolding       ██░░░░░░░░░░░░░░  Mar 31 – Apr 1
+Phase 1: Core Services             ████░░░░░░░░░░░░  Apr 2 – Apr 8
+Phase 2: Infra, Deploy & CI/CD     ██████░░░░░░░░░░  Apr 9 – Apr 15
+Phase 3: Frontend, Polish & Docs   ████████░░░░░░░░  Apr 16 – Apr 22
+Presentation Day                   ████████████████  Apr 23
 ```
 
 ---
 
-## Phase 0 — Setup & Scaffolding (Days 1–2)
+## Phase 0 — Setup & Scaffolding (Mar 31 – Apr 1)
 
 **Goal:** Repo structure, Kanban board, API contracts agreed, one vertical slice working locally.
 
@@ -358,7 +361,7 @@ Phase 3: Frontend, Polish & Docs   ████████░░░░░░░
 
 ---
 
-## Phase 1 — Core Services (Days 3–5)
+## Phase 1 — Core Services (Apr 2 – Apr 8)
 
 **Goal:** ML endpoints live, agent wired with tools, CI green. The core pipeline works locally.
 
@@ -414,7 +417,7 @@ Phase 3: Frontend, Polish & Docs   ████████░░░░░░░
 
 ---
 
-## Phase 2 — Infrastructure, Deploy & CI/CD (Days 5–7)
+## Phase 2 — Infrastructure, Deploy & CI/CD (Apr 9 – Apr 15)
 
 **Goal:** Everything running on Kubernetes, CI/CD deploys automatically, full agentic pipeline working.
 
@@ -455,7 +458,7 @@ Phase 3: Frontend, Polish & Docs   ████████░░░░░░░
 
 ---
 
-## Phase 3 — Frontend, Polish & Docs (Days 7–9)
+## Phase 3 — Frontend, Polish & Docs (Apr 16 – Apr 22)
 
 **Goal:** Chat UI live, full pipeline working, docs complete, demo-ready.
 
