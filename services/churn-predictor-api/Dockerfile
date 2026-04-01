@@ -10,6 +10,7 @@ WORKDIR /app
 COPY --from=builder /root/.local /root/.local
 COPY . .
 ENV PATH=/root/.local/bin:$PATH
+ENV MODEL_DIR=/app/model
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
   CMD python -c "import httpx; httpx.get('http://localhost:8001/health')" || exit 1

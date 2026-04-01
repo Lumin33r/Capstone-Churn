@@ -25,3 +25,6 @@ dist/
 
 # Docker
 *.log
+
+# Data
+sagemaker/*/data/*.csv
