@@ -19,7 +19,7 @@ variable "environment" {
   default     = "dev"
 
   validation {
-    condition = contains(["dev", "staging", "prod"], var.environment)
+    condition     = contains(["dev", "staging", "prod"], var.environment)
     error_message = "Environment must be dev, staging, or prod."
   }
 }
@@ -27,28 +27,30 @@ variable "environment" {
 variable "s3_bucket_name" {
   description = "S3 bucket for storing transcripts and model artifacts"
   type        = string
-  default     = "retention-engine-transcript-dev"
+  default     = "retention-engine-bucket"
 }
 
 # Anthropic Claude
 # Best for complex reasoning, analysis, and following detailed instruction
 variable "agent_model" {
-  description = "Foundation model ID for the agent. Change this to upgrade models."
+  description = "Foundation model ID for the agent. Change this to update models."
   type = object({
-    id      = string  # Bedrock model ID
-    display = string  # Human-readable name for tags/logs
+    id         = string # Bedrock model ID
+    display    = string # Human-readable name for tags/logs
+    model_name = string
   })
   # Model supports on‑demand invocation
   default = {
-    id      = "anthropic.claude-3-haiku-20240307-v1:0" #TODO: confirm model
-    display = "Claude Haiku 3"
+    id         = "anthropic.claude-3-haiku-20240307-v1:0" #TODO: confirm model
+    display    = "Claude Haiku 3"
+    model_name = "bedrock"
   }
 }
 
-variable "agent_sentiment" {
-  description = "Name of the Bedrock agent"
+variable "sentiment_endpoint_name" {
+  description = "Name of the SageMaker endpoint for sentiment analysis"
   type        = string
-  default     = "sentiment"
+  default     = "sentiment-analysis-endpoint"
 }
 
 variable "agent_instruction" {

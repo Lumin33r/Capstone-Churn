@@ -4,12 +4,12 @@
 
 output "s3_bucket_name" {
   description = "Name of the S3 data bucket"
-  value       = aws_s3_bucket.data.bucket
+  value       = aws_s3_bucket.customer_bucket.bucket
 }
 
 output "s3_bucket_arn" {
   description = "ARN of the S3 data bucket"
-  value       = aws_s3_bucket.data.arn
+  value       = aws_s3_bucket.customer_bucket.arn
 }
 
 output "bedrock_role_arn" {

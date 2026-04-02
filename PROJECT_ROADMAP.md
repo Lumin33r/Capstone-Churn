@@ -65,11 +65,11 @@ CI/CD: GitHub Actions → Build → Push GHCR → Deploy to EKS
 capstone/
 ├── .github/
 │   └── workflows/
-│       ├── ci-backend.yml          # Build + push backend image
-│       ├── ci-frontend.yml         # Build + push frontend image
-│       ├── ci-ml-wrappers.yml      # Build + push ML wrapper images
-│       ├── deploy.yml              # kubectl apply to EKS
-│       └── terraform.yml           # (bonus) tf plan/apply
+│       ├── ci-backend.yaml          # Build + push backend image
+│       ├── ci-frontend.yaml         # Build + push frontend image
+│       ├── ci-ml-wrappers.yaml      # Build + push ML wrapper images
+│       ├── deploy.yaml              # kubectl apply to EKS
+│       └── terraform.yaml           # (bonus) tf plan/apply
 ├── terraform/
 │   ├── main.tf
 │   ├── variables.tf
@@ -77,17 +77,21 @@ capstone/
 │   ├── providers.tf
 │   └── modules/                    # (bonus) networking, iam, sagemaker
 ├── k8s/
-│   ├── namespace.yml
-│   ├── configmap.yml
-│   ├── secrets.yml                 # (template — real values via GH Secrets)
-│   ├── backend-deployment.yml
-│   ├── backend-service.yml
-│   ├── churn-wrapper-deployment.yml
-│   ├── churn-wrapper-service.yml
-│   ├── transcript-wrapper-deployment.yml
-│   ├── transcript-wrapper-service.yml
-│   ├── frontend-deployment.yml
-│   └── frontend-service.yml
+│   ├── namespace.yaml
+│   configmaps/
+|      ├── agent-config.yaml
+|   deployments/
+|      ├── agent-deployment.yaml
+|      ├── backend-deployment.yaml
+|      ├── churn-wrapper-deployment.yaml
+|      ├── frontend-deployment.yaml
+|      ├── transcript-wrapper-deployment.yaml
+│   ├── secrets.yaml             # (template — real values via GH Secrets)
+|   services/
+│      ├── backend-service.yaml
+│      ├── churn-wrapper-service.yaml
+│      ├── transcript-wrapper-service.yaml
+│      └── frontend-service.yaml
 ├── backend/
 │   ├── Dockerfile
 │   ├── app/
@@ -121,7 +125,7 @@ capstone/
 │   ├── Dockerfile
 │   ├── src/                        # React or Streamlit app
 │   └── ...
-├── docker-compose.yml              # Local dev: all services together
+├── docker-compose.yaml              # Local dev: all services together
 ├── docs/
 │   ├── architecture.md
 │   ├── setup.md
@@ -139,7 +143,7 @@ capstone/
 | Component                   | Primary Owner        | Support                         | Key Deliverables                                    |
 | --------------------------- | -------------------- | ------------------------------- | --------------------------------------------------- |
 | GitHub Projects / Kanban    | **Troy**             | All                             | Board setup, task cards, sprint tracking            |
-| GitHub Actions CI/CD        | **Troy**             | George                          | All `.yml` workflows, secrets config                |
+| GitHub Actions CI/CD        | **Troy**             | George                          | All `.yaml` workflows, secrets config                |
 | Dataset identification      | **Kathleen + Okino** | —                               | Churn dataset, transcript dataset                   |
 | SageMaker training + deploy | **Kathleen + Okino** | —                               | `sagemaker/` training scripts, live endpoints       |
 | ML FastAPI wrappers         | **Kathleen + Okino** | Troy (CI)                       | `ml-wrappers/` services with `/predict` + `/health` |
@@ -272,11 +276,11 @@ Feature Branch Push          Merge to Main
 
 | File                 | Trigger                  | What It Does                           |
 | -------------------- | ------------------------ | -------------------------------------- |
-| `ci-backend.yml`     | push to `backend/**`     | Build + push backend image             |
-| `ci-ml-wrappers.yml` | push to `ml-wrappers/**` | Build + push both wrapper images       |
-| `ci-frontend.yml`    | push to `frontend/**`    | Build + push frontend image            |
-| `deploy.yml`         | merge to `main`          | `kubectl apply -f k8s/` + health check |
-| `terraform.yml`      | (bonus) manual trigger   | `tf plan` on PR, `tf apply` on merge   |
+| `ci-backend.yaml`     | push to `backend/**`     | Build + push backend image             |
+| `ci-ml-wrappers.yaml` | push to `ml-wrappers/**` | Build + push both wrapper images       |
+| `ci-frontend.yaml`    | push to `frontend/**`    | Build + push frontend image            |
+| `deploy.yaml`         | merge to `main`          | `kubectl apply -f k8s/` + health check |
+| `terraform.yaml`      | (bonus) manual trigger   | `tf plan` on PR, `tf apply` on merge   |
 
 ---
 
@@ -326,7 +330,7 @@ Phase 3: Frontend, Polish & Docs   ████████░░░░░░░
 - [ ] Set branch protection on `main` (require PR + 1 approval)
 - [ ] Agree on branch naming convention with team (e.g., `feat/<owner>-<description>`, `fix/...`)
 - [ ] Scaffold `.github/workflows/` with placeholder workflow files
-- [ ] Create `docker-compose.yml` skeleton for local dev
+- [ ] Create `docker-compose.yaml` skeleton for local dev
 
 ### George — Infrastructure & Backend Scaffold
 - [ ] Scaffold `terraform/` directory (main.tf, variables.tf, outputs.tf, providers.tf)
