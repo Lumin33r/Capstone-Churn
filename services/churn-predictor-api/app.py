@@ -1,35 +1,26 @@
 """
-Churn Predictor API — FastAPI wrapper for the XGBoost churn model.
-Loads the trained model and serves predictions via /predict and /health routes.
+Churn Predictor API — FastAPI wrapper that calls the SageMaker endpoint.
+Routes: /predict and /health
 """
 
 import json
 import os
-from pathlib import Path
 
-import joblib
-import numpy as np
-import pandas as pd
+import boto3
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 app = FastAPI(title="Churn Predictor API")
 
-# --- Load model artifacts at startup ---
-MODEL_DIR = os.environ.get("MODEL_DIR", "/app/model")
+# --- Config ---
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+ENDPOINT_NAME = os.environ.get("SAGEMAKER_ENDPOINT", "churn-predictor-endpoint")
 
-model = joblib.load(Path(MODEL_DIR) / "churn_model.joblib")
-
-with open(Path(MODEL_DIR) / "feature_columns.json") as f:
-    FEATURE_COLUMNS = json.load(f)
-
-with open(Path(MODEL_DIR) / "label_encoders.json") as f:
-    LABEL_ENCODERS = json.load(f)
+sagemaker_runtime = boto3.client("sagemaker-runtime", region_name=REGION)
 
 
 # --- Request / Response schemas ---
 class PredictRequest(BaseModel):
-    """Accepts customer + service features as key-value pairs."""
     plan_tier: str = "Standard_100"
     speed_mbps: float = 100
     monthly_cost: float = 75.0
@@ -68,40 +59,29 @@ def health():
     return {
         "status": "healthy",
         "model": "churn-xgboost",
-        "features": len(FEATURE_COLUMNS),
+        "endpoint": ENDPOINT_NAME,
     }
 
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
     try:
-        row = req.model_dump()
+        payload = req.model_dump()
 
-        # Encode categorical / boolean fields using the saved label encoders
-        for col, mapping in LABEL_ENCODERS.items():
-            val = str(row.get(col, ""))
-            if val not in mapping:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unknown value '{val}' for '{col}'. Valid: {list(mapping.keys())}",
-                )
-            row[col] = mapping[val]
+        # Convert bools to strings for the label encoder on the SageMaker side
+        for key in ["work_from_home_flag", "fiber_availability"]:
+            payload[key] = str(payload[key])
 
-        # Build a single-row DataFrame in the exact column order the model expects
-        df = pd.DataFrame([row], columns=FEATURE_COLUMNS)
-
-        # Predict
-        proba = float(model.predict_proba(df)[0, 1])
-        prediction = "churn" if proba >= 0.5 else "no_churn"
-        risk_level = "HIGH" if proba >= 0.7 else "MEDIUM" if proba >= 0.4 else "LOW"
-
-        return PredictResponse(
-            churn_probability=round(proba, 4),
-            prediction=prediction,
-            risk_level=risk_level,
+        response = sagemaker_runtime.invoke_endpoint(
+            EndpointName=ENDPOINT_NAME,
+            ContentType="application/json",
+            Body=json.dumps(payload),
         )
 
-    except HTTPException:
-        raise
+        result = json.loads(response["Body"].read().decode())
+        return PredictResponse(**result)
+
+    except sagemaker_runtime.exceptions.ModelError as e:
+        raise HTTPException(status_code=502, detail=f"SageMaker model error: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
