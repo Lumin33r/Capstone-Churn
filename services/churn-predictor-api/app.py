@@ -1,12 +1,16 @@
 """
-Churn Predictor API — FastAPI wrapper that calls the SageMaker endpoint.
+Churn Predictor API — FastAPI wrapper that looks up account data
+by customer_id, combines with Agent 1 output, and calls SageMaker.
+
 Routes: /predict and /health
 """
 
+import io
 import json
 import os
 
 import boto3
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -15,42 +19,50 @@ app = FastAPI(title="Churn Predictor API")
 # --- Config ---
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 ENDPOINT_NAME = os.environ.get("SAGEMAKER_ENDPOINT", "churn-predictor-endpoint")
+S3_BUCKET = os.environ.get("S3_BUCKET", "retention-engine-bucket")
 
 sagemaker_runtime = boto3.client("sagemaker-runtime", region_name=REGION)
+s3 = boto3.client("s3", region_name=REGION)
+
+# --- Load account data at startup ---
+# Cache the joined customer + internet data in memory so we don't hit S3 every request
+_account_data: pd.DataFrame | None = None
+
+
+def load_account_data() -> pd.DataFrame:
+    """Load and join internet + customer data from S3, cache in memory."""
+    global _account_data
+    if _account_data is not None:
+        return _account_data
+
+    # Load internet data
+    obj = s3.get_object(Bucket=S3_BUCKET, Key="data/internet_data.csv")
+    internet_df = pd.read_csv(io.BytesIO(obj["Body"].read()))
+
+    # Load customer data
+    obj = s3.get_object(Bucket=S3_BUCKET, Key="data/trilink_customers_data.csv")
+    customers_df = pd.read_csv(io.BytesIO(obj["Body"].read()))
+
+    # Join and index by customer_id
+    merged = internet_df.merge(customers_df, on="customer_id", how="inner")
+    _account_data = merged.set_index("customer_id")
+    return _account_data
 
 
 # --- Request / Response schemas ---
 class PredictRequest(BaseModel):
-    plan_tier: str = "Standard_100"
-    speed_mbps: float = 100
-    monthly_cost: float = 75.0
-    data_usage_gb: float = 200.0
-    connected_devices: int = 5
-    contract_type: str = "Month_to_Month"
-    speed_complaints: int = 0
-    outage_count: int = 0
-    internet_tenure_days: float = 365.0
-    contract_completed_percent: float = 0.5
-    age: int = 35
-    household_income: int = 60000
-    income_bracket: str = "Middle"
-    family_size: int = 3
-    home_ownership: str = "Own"
-    work_from_home_flag: bool = False
-    education_level: str = "College"
-    life_stage: str = "Established_Family"
-    home_type: str = "Single_Family"
-    home_square_footage: int = 1500
-    property_value: int = 300000
-    neighborhood_crime_rate: float = 3.0
-    neighborhood_income_median: int = 55000
-    fiber_availability: bool = True
+    """Agent 1 output + customer_id. The wrapper looks up account data internally."""
+    customer_id: str
+    qa_score: float = 5.0
+    sentiment: str = "Neutral"
+    frustration_level: float = 5.0
 
 
 class PredictResponse(BaseModel):
     churn_probability: float
     prediction: str
     risk_level: str
+    customer_id: str
 
 
 # --- Routes ---
@@ -66,12 +78,53 @@ def health():
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
     try:
-        payload = req.model_dump()
+        # 1. Load account data
+        account_data = load_account_data()
 
-        # Convert bools to strings for the label encoder on the SageMaker side
-        for key in ["work_from_home_flag", "fiber_availability"]:
-            payload[key] = str(payload[key])
+        # 2. Look up this customer
+        if req.customer_id not in account_data.index:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Customer {req.customer_id} not found",
+            )
 
+        customer = account_data.loc[req.customer_id]
+
+        # 3. Build the full feature payload for SageMaker
+        payload = {
+            # Service features (from account lookup)
+            "plan_tier": customer["plan_tier"],
+            "speed_mbps": int(customer["speed_mbps"]),
+            "monthly_cost": float(customer["monthly_cost"]),
+            "data_usage_gb": float(customer["data_usage_gb"]),
+            "connected_devices": int(customer["connected_devices"]),
+            "contract_type": customer["contract_type"],
+            "speed_complaints": int(customer["speed_complaints"]),
+            "outage_count": int(customer["outage_count"]),
+            "internet_tenure_days": float(customer.get("internet_tenure_days", 0)),
+            "contract_completed_percent": float(customer.get("contract_completed_percent", 0)),
+            # Demographic features (from account lookup)
+            "age": int(customer["age"]),
+            "household_income": int(customer["household_income"]),
+            "income_bracket": customer["income_bracket"],
+            "family_size": int(customer["family_size"]),
+            "home_ownership": customer["home_ownership"],
+            "work_from_home_flag": str(customer["work_from_home_flag"]),
+            "education_level": customer["education_level"],
+            "life_stage": customer["life_stage"],
+            "home_type": customer["home_type"],
+            "home_square_footage": int(customer["home_square_footage"]),
+            "property_value": int(customer["property_value"]),
+            "neighborhood_crime_rate": float(customer["neighborhood_crime_rate"]),
+            "neighborhood_income_median": int(customer["neighborhood_income_median"]),
+            "fiber_availability": str(customer["fiber_availability"]),
+            # Agent 1 features (from request)
+            "qa_score": req.qa_score,
+            "sentiment": req.sentiment,
+            "frustration_level": req.frustration_level,
+        }
+
+        # 4. Call SageMaker
         response = sagemaker_runtime.invoke_endpoint(
             EndpointName=ENDPOINT_NAME,
             ContentType="application/json",
@@ -79,9 +132,12 @@ def predict(req: PredictRequest):
         )
 
         result = json.loads(response["Body"].read().decode())
-        return PredictResponse(**result)
+        return PredictResponse(
+            customer_id=req.customer_id,
+            **result,
+        )
 
-    except sagemaker_runtime.exceptions.ModelError as e:
-        raise HTTPException(status_code=502, detail=f"SageMaker model error: {e}")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -46,5 +46,10 @@
   "fiber_availability": {
     "False": 0,
     "True": 1
+  },
+  "sentiment": {
+    "Negative": 0,
+    "Neutral": 1,
+    "Positive": 2
   }
 }
