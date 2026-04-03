@@ -1,20 +1,16 @@
-# k8s/deployments/agent-deployment.yaml
-# Tells Kubernetes to run the LangChain agent service container
-# readinessProbe: waits until /health returns 200 before sending traffic
-# livenessProbe: restarts the container if /health stops returning 200
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: agent-service
+  name: transcript-wrapper-deployment
   namespace: retention-engine
   labels:
-    app: agent-service
+    app: transcript-wrapper-deployment
     team: retention-engine
 spec:
   replicas: 1
   selector:
-    matchLabels:
-      app: agent-service
+    matchLabels: 
+      app: transcript-wrapper-deployment
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -23,23 +19,20 @@ spec:
   template:
     metadata:
       labels:
-        app: agent-service
+        app: transcript-wrapper-deployment
     spec:
       containers:
-        - name: agent-service
-          image: ghcr.io/lumin33r/agent-service:latest
+        - name: transcript-wrapper-deployment
+          image: ghcr.io/lumin33r/transcript-wrapper-deployment:latest
           ports:
             - containerPort: 8000
-          envFrom:
-            - configMapRef:
-                name: agent-config
-            - secretRef:
-                name: aws-secrets
           readinessProbe:
             httpGet:
               path: /health
               port: 8000
             initialDelaySeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
             periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
@@ -47,6 +40,8 @@ spec:
               path: /health
               port: 8000
             initialDelaySeconds: 20
+            timeoutSeconds: 1
+            successThreshold: 1
             periodSeconds: 10
             failureThreshold: 3
           resources:

@@ -6,7 +6,7 @@ import httpx
 import os
 from langchain.tools import tool
 
-CHURN_URL = os.getenv("CHURN_PREDICTOR_URL", "http://localhost:8001")
+CHURN_URL = os.getenv(key="CHURN_PREDICTOR_URL", default="http://localhost:8001")
 
 
 @tool
@@ -32,7 +32,7 @@ def predict_churn(
     """
     try:
         response = httpx.post(
-            f"{CHURN_URL}/predict",
+            url=f"{CHURN_URL}/predict",
             json={
                 "qa_score": qa_score,
                 "contract_length": contract_length,
@@ -42,10 +42,10 @@ def predict_churn(
             timeout=30.0,
         )
         response.raise_for_status()
-        return str(response.json())
+        return str(object=response.json())
     except httpx.TimeoutException:
         return '{"error": "Churn service timeout", "churn_probability": 0.5, "risk_level": "MEDIUM"}'
     except httpx.HTTPStatusError as e:
         return f'{{"error": "Churn service returned {e.response.status_code}", "churn_probability": 0.5, "risk_level": "MEDIUM"}}'
     except Exception as e:
-        return f'{{"error": "{str(e)}", "churn_probability": 0.5, "risk_level": "MEDIUM"}}'
+        return f'{{"error": "{str(object=e)}", "churn_probability": 0.5, "risk_level": "MEDIUM"}}'

@@ -3,21 +3,27 @@ kind: Deployment
 metadata:
   name: churn-wrapper-deployment
   namespace: retention-engine
-
+  labels:
+    app: churn-wrapper-deployment
+    team: retention-engine
 spec:
   replicas: 2
   selector:
     matchLabels:
       app: churn-wrapper-deployment
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
         app: churn-wrapper-deployment
-
     spec:
       containers:
         - name: churn-wrapper-deployment
-          image: ghcr.io/lumin33r/backend:latest
+          image: ghcr.io/lumin33r/churn-wrapper-deployment:latest
           ports:
             - containerPort: 8000             
           readinessProbe:
