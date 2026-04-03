@@ -21,14 +21,14 @@ import boto3
 
 # ── Configuration ─────────────────────────────────────────────────────
 REGION = os.environ.get("AWS_REGION", "us-east-1")
-S3_BUCKET = os.environ.get("S3_BUCKET", "retention-engine-transcript-dev")
+S3_BUCKET = os.environ.get("S3_BUCKET", "sagemaker-us-east-1-388691194728")
 MODEL_PREFIX = "models/churn"
 ENDPOINT_NAME = "churn-predictor-endpoint"
 MODEL_NAME = "churn-predictor-model"
 ENDPOINT_CONFIG_NAME = "churn-predictor-config"
 EXECUTION_ROLE_ARN = os.environ.get(
     "SAGEMAKER_ROLE_ARN",
-    "arn:aws:iam::388691194728:role/sagemaker-execution-role",
+    "arn:aws:iam::388691194728:role/service-role/AmazonSageMaker-ExecutionRole-20260224T095369",
 )
 INSTANCE_TYPE = "ml.m5.large"
 
@@ -164,16 +164,23 @@ def delete_endpoint() -> None:
     """Tear down the endpoint, config, and model."""
     sm = boto3.client("sagemaker", region_name=REGION)
 
-    for name, delete_fn in [
-        (ENDPOINT_NAME, sm.delete_endpoint),
-        (ENDPOINT_CONFIG_NAME, sm.delete_endpoint_config),
-        (MODEL_NAME, sm.delete_model),
-    ]:
-        try:
-            print(f"Deleting {name}...")
-            delete_fn(**{list(delete_fn.__code__.co_varnames)[1]: name})
-        except sm.exceptions.ClientError as e:
-            print(f"  {name} not found or already deleted: {e}")
+    try:
+        print(f"Deleting endpoint: {ENDPOINT_NAME}...")
+        sm.delete_endpoint(EndpointName=ENDPOINT_NAME)
+    except Exception as e:
+        print(f"  {e}")
+
+    try:
+        print(f"Deleting endpoint config: {ENDPOINT_CONFIG_NAME}...")
+        sm.delete_endpoint_config(EndpointConfigName=ENDPOINT_CONFIG_NAME)
+    except Exception as e:
+        print(f"  {e}")
+
+    try:
+        print(f"Deleting model: {MODEL_NAME}...")
+        sm.delete_model(ModelName=MODEL_NAME)
+    except Exception as e:
+        print(f"  {e}")
 
 
 def test_endpoint() -> None:
