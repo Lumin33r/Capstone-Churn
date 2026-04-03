@@ -8,8 +8,7 @@ metadata:
   namespace: retention-engine
 data:
   AWS_REGION: "us-east-1"
-  QA_EVALUATOR_URL: "http://qa-evaluator-service:8000"
+  QA_EVALUATOR_URL: "http://sentiment-analysis-service:8000"
   CHURN_PREDICTOR_URL: "http://churn-predictor-service:8001"
   LOG_LEVEL: "INFO"
   MODEL_ID: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-  
