@@ -6,7 +6,7 @@ import httpx
 import os
 from langchain.tools import tool
 
-QA_URL = os.getenv("QA_EVALUATOR_URL", "http://localhost:8000")
+QA_URL = os.getenv(key="QA_EVALUATOR_URL", default="http://localhost:8000")
 
 
 @tool
@@ -24,15 +24,15 @@ def analyze_call(transcript: str) -> str:
     """
     try:
         response = httpx.post(
-            f"{QA_URL}/predict",
+            url=f"{QA_URL}/predict",
             json={"text": transcript},
             timeout=30.0,
         )
         response.raise_for_status()
-        return str(response.json())
+        return str(object=response.json())
     except httpx.TimeoutException:
         return '{"error": "QA service timeout", "qa_score": 5, "sentiment": "unknown"}'
     except httpx.HTTPStatusError as e:
         return f'{{"error": "QA service returned {e.response.status_code}", "qa_score": 5, "sentiment": "unknown"}}'
     except Exception as e:
-        return f'{{"error": "{str(e)}", "qa_score": 5, "sentiment": "unknown"}}'
+        return f'{{"error": "{str(object=e)}", "qa_score": 5, "sentiment": "unknown"}}'
