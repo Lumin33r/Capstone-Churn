@@ -1,6 +1,6 @@
 # services/agent-service/app.py
 # FastAPI entry point for the LangChain agentic harness
-# George (gvill0576) — Capstone-Churn
+# Updated by Kathleen & Okino — passes customer_id to agent
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,6 +11,37 @@ import os, re
 load_dotenv()
 
 app = FastAPI(title="Retention Engine Agent Service")
+
+# --- Guardrails: approved retention actions by risk level ---
+APPROVED_ACTIONS = {
+    "HIGH": [
+        "PLAN_UPGRADE", "LOYALTY_DISCOUNT", "SERVICE_CREDIT",
+        "TECH_VISIT", "DEDICATED_SUPPORT", "CONTRACT_FLEX",
+    ],
+    "MEDIUM": ["FOLLOWUP_48H", "GOODWILL_CREDIT", "SPEED_BOOST"],
+    "LOW": ["MONITOR"],
+}
+
+
+def validate_action(output: str, risk_level: str | None) -> str:
+    """Check that the agent's recommended action is in the approved list.
+    If not, append a warning and default to the safest action for that risk level."""
+    action_match = re.search(r"Action:\s*(\S+)", output)
+    if not action_match or not risk_level:
+        return output
+
+    action = action_match.group(1)
+    allowed = APPROVED_ACTIONS.get(risk_level, [])
+
+    if action not in allowed:
+        default = allowed[0] if allowed else "MONITOR"
+        output += (
+            f"\n\n⚠ GUARDRAIL: Action '{action}' is not approved for {risk_level} risk. "
+            f"Overriding to {default}."
+        )
+        output = output.replace(f"Action: {action}", f"Action: {default}")
+
+    return output
 
 app.add_middleware(
     middleware_class=CORSMiddleware,
@@ -27,7 +58,9 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    customer_id: str | None = None
     qa_score: float | None = None
+    sentiment: str | None = None
     churn_probability: float | None = None
     risk_level: str | None = None
     retention_recommendation: str | None = None
@@ -43,20 +76,35 @@ async def chat(body: ChatRequest) -> ChatResponse:
     from chains.retention_agent import get_agent
     try:
         agent = get_agent()
-        result = agent.invoke({"input": body.message})
+
+        # Include customer_id in the agent input if provided
+        agent_input = body.message
+        if body.customer_id:
+            agent_input = f"Customer ID: {body.customer_id}\n\n{body.message}"
+
+        result = agent.invoke({"input": agent_input})
         output = result.get("output", "")
 
-        qa_match    = re.search(pattern=r"QA Score:\s*([\d.]+)", string=output)
-        churn_match = re.search(pattern=r"([\d.]+)%", string=output)
-        risk_match  = re.search(pattern=r"Churn Risk:\s*(LOW|MEDIUM|HIGH)", string=output)
-        rec_match   = re.search(pattern=r"Recommendation:\s*(.+?)(?:\n|$)", string=output)
+        # Parse structured output
+        qa_match       = re.search(r"QA Score:\s*([\d.]+)", output)
+        sentiment_match = re.search(r"Sentiment:\s*(Positive|Neutral|Negative)", output)
+        churn_match    = re.search(r"([\d.]+)%", output)
+        risk_match     = re.search(r"Churn Risk:\s*(LOW|MEDIUM|HIGH)", output)
+        rec_match      = re.search(r"Recommendation:\s*(.+?)(?:\n|$)", output)
+        cid_match      = re.search(r"Customer ID:\s*(C\d+)", output)
+
+        # Guardrail: validate the recommended action
+        risk_level = risk_match.group(1) if risk_match else None
+        output = validate_action(output, risk_level)
 
         return ChatResponse(
             response=output,
+            customer_id=cid_match.group(1) if cid_match else body.customer_id,
             qa_score=float(qa_match.group(1)) if qa_match else None,
+            sentiment=sentiment_match.group(1) if sentiment_match else None,
             churn_probability=float(churn_match.group(1)) / 100 if churn_match else None,
             risk_level=risk_match.group(1) if risk_match else None,
             retention_recommendation=rec_match.group(1).strip() if rec_match else None,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(object=e))
+        raise HTTPException(status_code=500, detail=str(e))
