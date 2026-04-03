@@ -49,9 +49,8 @@ def package_model(tar_path: str) -> str:
     with tarfile.open(tar_path, "w:gz") as tar:
         for filepath in MODEL_FILES:
             tar.add(filepath, arcname=os.path.basename(filepath))
-        # SageMaker sklearn container needs inference.py + setup.py in code/
-        tar.add(INFERENCE_SCRIPT, arcname="code/inference.py")
-        tar.add(SETUP_SCRIPT, arcname="code/setup.py")
+        # inference.py goes at the root of the tar alongside model files
+        tar.add(INFERENCE_SCRIPT, arcname="inference.py")
     print(f"  Created {tar_path}")
     return tar_path
 
@@ -81,6 +80,7 @@ def create_endpoint(s3_uri: str) -> None:
                 "ModelDataUrl": s3_uri,
                 "Environment": {
                     "SAGEMAKER_PROGRAM": "inference.py",
+                    "SAGEMAKER_SUBMIT_DIRECTORY": s3_uri,
                 },
             },
             ExecutionRoleArn=EXECUTION_ROLE_ARN,
