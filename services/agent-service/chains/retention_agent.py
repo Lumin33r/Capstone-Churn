@@ -2,12 +2,18 @@
 # The main LangChain agent that orchestrates the full retention analysis
 # George (gvill0576) — Capstone-Churn
 
-import os
 from langchain_aws import ChatBedrock
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 from tools.qa_tool import analyze_call
 from tools.churn_tool import predict_churn
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+MODEL_ID: str = os.getenv(key="MODEL_ID", default="us.anthropic.claude-haiku-4-5-20251001-v1:0")
+AWS_REGION: str = os.getenv(key="AWS_REGION", default="us-east-1")
 
 SYSTEM_PROMPT = """You are the Retention Engine AI for a customer support team.
 Your job is to analyze customer support calls and identify at-risk customers.
@@ -34,16 +40,14 @@ Recommendation: [specific action for this customer]
 def create_retention_agent() -> AgentExecutor:
     """Creates and returns the configured LangChain agent executor."""
     llm = ChatBedrock(
-        model_id=os.getenv(
-            "MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-        ),
-        region_name=os.getenv("AWS_REGION", "us-east-1"),
+        model=MODEL_ID,
+        region=AWS_REGION,
         model_kwargs={"max_tokens": 1024, "temperature": 0},
     )
 
     tools = [analyze_call, predict_churn]
 
-    prompt = ChatPromptTemplate.from_messages([
+    prompt = ChatPromptTemplate.from_messages(messages=[
         ("system", SYSTEM_PROMPT),
         ("human", "{input}"),
         ("placeholder", "{agent_scratchpad}"),
@@ -62,7 +66,6 @@ def create_retention_agent() -> AgentExecutor:
 
 # Singleton pattern — create once, reuse across requests
 _agent_executor: AgentExecutor | None = None
-
 
 def get_agent() -> AgentExecutor:
     """Returns the shared agent instance, creating it on first call."""

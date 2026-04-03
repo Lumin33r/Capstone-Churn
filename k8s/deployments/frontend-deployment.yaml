@@ -1,0 +1,49 @@
+# Manages the set of Pods specific to the frontend application to run that application
+# workload and maintain the desired state
+
+# Will deployment require rolling updates???
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  namespace: retention-engine
+  labels:
+    app: frontend-deployment
+    team: retention-engine
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend-deployment
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: frontend-deployment
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/lumin33r/frontend:latest
+          ports:
+            - containerPort: 3000
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 30
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"

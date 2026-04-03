@@ -1,0 +1,49 @@
+# Manages the set of Pods specific to the backend application to run that application
+# workload and maintain the desired state
+
+# Will deployment require rolling updates???
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  namespace: retention-engine
+  labels:
+    app: backend-deployment
+    team: retention-engine
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend-deployment
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: backend-deployment
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/lumin33r/backend:latest
+          ports:
+            - containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 30
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
