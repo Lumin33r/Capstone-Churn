@@ -94,6 +94,19 @@ Used Claude Code as a pair programming partner throughout the capstone project. 
 **Problem:** All customers showing "Neutral" sentiment with 0.00 frustration/anger, even customers with call data.
 **Resolution:** Agent 1 synthetic CSV wasn't uploaded to S3. Uploaded it and restarted API.
 
+### Issue 14: Repeated File Loss During Branch Operations
+**Problem:** Frontend files (index.html, vite.config.ts, tsconfig.json, main.tsx, index.css, Dockerfile, nginx.conf) kept getting lost across branch switches, cherry-picks, and stash pops. Files would exist on one branch but not carry over to new branches created from main. This happened at least 3 times, requiring full recreation of the frontend scaffold each time.
+**Root Cause:** A combination of: (1) cherry-picking commits that created files not tracked on main, (2) stash conflicts on files that existed locally but not in the branch, (3) pushing to PRs that got merged, then creating new branches from main that didn't have the latest frontend code.
+**My Guidance:** After the third occurrence, I told Claude to stop trying complex git operations and just recreate the files directly.
+**Resolution:** Recreated missing files each time. The core issue was that our PR workflow kept branching from main, but main didn't always have the latest frontend code merged yet. Files committed on feature branches would disappear when switching back to main.
+**Key Learning:** When multiple feature branches are in flight and PRs merge asynchronously, always verify that your files exist on the current branch before starting work. Don't assume a file from a previous branch carried over.
+
+### Issue 15: Stale PRs Capturing Unrelated Commits
+**Problem:** Claude kept pushing new commits to existing open PRs instead of creating new feature branches. This meant PRs accumulated unrelated changes — a deploy fix PR would end up with frontend code, orchestration changes, and roadmap updates bundled together.
+**My Guidance:** "You keep trying to let old PRs capture new pushes. Make a feature branch and a PR every time!"
+**Resolution:** Established the rule: every new set of changes gets a fresh `git checkout main && git pull && git checkout -b feat/kathleen-<description>` and a new PR.
+**Key Learning:** Each PR should be a clean, focused unit of work. Reusing branches across multiple tasks makes reviews harder and increases conflict risk.
+
 ---
 
 ## Instances Where I Provided Guidance or Changed LLM Recommendations
