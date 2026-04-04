@@ -104,11 +104,11 @@ capstone/
 │   │   └── config.py               # Env var config
 │   └── requirements.txt
 ├── ml-wrappers/
-│   ├── churn/
+│   ├── churn-predictor-api/
 │   │   ├── Dockerfile
 │   │   ├── app.py                  # FastAPI /predict + /health
 │   │   └── requirements.txt
-│   └── transcript/
+│   └── sentiment-analysis-api/
 │       ├── Dockerfile
 │       ├── app.py                  # FastAPI /predict + /health
 │       └── requirements.txt
@@ -117,8 +117,8 @@ capstone/
 │   │   ├── train.py                # Training script or notebook
 │   │   ├── deploy.py               # Endpoint creation script
 │   │   └── data/                   # Sample data / data prep scripts
-│   └── transcript/
-│       ├── train.py
+│   └── sentiment/
+│       ├── sentiment_training.ipynb
 │       ├── deploy.py
 │       └── data/
 ├── frontend/
