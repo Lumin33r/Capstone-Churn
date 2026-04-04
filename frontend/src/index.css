@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-trilink-dark: #1e3a5f;
+  --color-trilink-mid: #2d5f8a;
+  --color-trilink-light: #00b4d8;
+  --color-trilink-accent: #0ea5e9;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+}
