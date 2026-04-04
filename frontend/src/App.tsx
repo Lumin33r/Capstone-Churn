@@ -4,20 +4,41 @@ import {
   TrendingDown, TrendingUp, ArrowUpCircle, DollarSign,
   CreditCard, Wrench, User, FileText, Gift, Zap,
   BarChart3, Shield, Loader2, ChevronDown, Wifi,
+  MessageSquare, Send,
 } from "lucide-react";
 
-const AGENT_API_URL = import.meta.env.VITE_AGENT_API_URL || "http://localhost:8000";
 const CHURN_API_URL = import.meta.env.VITE_CHURN_API_URL || "http://localhost:8001";
+const AGENT_API_URL = import.meta.env.VITE_AGENT_API_URL || "http://localhost:8000";
 
-interface ChatResponse {
-  response: string;
-  customer_id: string | null;
-  qa_score: number | null;
-  sentiment: string | null;
-  churn_probability: number | null;
-  risk_level: string | null;
-  retention_recommendation: string | null;
+// ── Types ────────────────────────────────────────────────────────────
+
+interface PredictResponse {
+  churn_probability: number;
+  prediction: string;
+  risk_level: string;
+  customer_id: string;
+  has_call_data: boolean;
+  qa_score: number;
+  sentiment: string;
+  emotion_frustration: number;
+  emotion_anger: number;
+  sentiment_shift: number;
+  escalation_flag: number;
+  resolution_flag: number;
 }
+
+interface ChatMessage {
+  role: "user" | "agent";
+  text: string;
+  timestamp: Date;
+}
+
+interface Customer {
+  id: string;
+  label: string;
+}
+
+// ── Constants ────────────────────────────────────────────────────────
 
 const RISK_STYLES: Record<string, { bg: string; border: string; text: string; bar: string; badge: string }> = {
   HIGH: { bg: "bg-red-100", border: "border-red-500", text: "text-red-700", bar: "bg-red-500", badge: "bg-red-600" },
@@ -37,6 +58,8 @@ const ACTION_INFO: Record<string, { icon: typeof ArrowUpCircle; desc: string }> 
   SPEED_BOOST: { icon: Zap, desc: "Free speed boost trial for 1 month" },
   MONITOR: { icon: CheckCircle, desc: "No retention action needed" },
 };
+
+// ── Shared Components ────────────────────────────────────────────────
 
 function ProgressBar({ label, value, color }: { label: string; value: number; color: string }) {
   const pct = Math.min(100, Math.round(value * 100));
@@ -71,23 +94,15 @@ function RiskCard({ riskLevel, churnProbability }: { riskLevel: string | null; c
   );
 }
 
-function SentimentCard({ qaScore, sentiment, response }: { qaScore: number | null; sentiment: string | null; response: string }) {
-  const frustMatch = response.match(/Frustration:\s*([\d.]+)/);
-  const angerMatch = response.match(/Anger:\s*([\d.]+)/);
-  const shiftMatch = response.match(/Sentiment Shift:\s*([-\d.]+)/);
-  const escalatedMatch = response.match(/Escalated:\s*(Yes|No)/);
-  const resolvedMatch = response.match(/Resolved:\s*(Yes|No)/);
-
-  const frustration = frustMatch ? parseFloat(frustMatch[1]) : null;
-  const anger = angerMatch ? parseFloat(angerMatch[1]) : null;
-  const shift = shiftMatch ? parseFloat(shiftMatch[1]) : null;
-  const escalated = escalatedMatch ? escalatedMatch[1] : null;
-  const resolved = resolvedMatch ? resolvedMatch[1] : null;
+function SentimentCard({ result }: { result: PredictResponse }) {
+  const { qa_score: qaScore, sentiment, emotion_frustration: frustration,
+    emotion_anger: anger, sentiment_shift: shift,
+    escalation_flag, resolution_flag } = result;
+  const escalated = escalation_flag === 1 ? "Yes" : "No";
+  const resolved = resolution_flag === 1 ? "Yes" : "No";
 
   const sentimentColor: Record<string, string> = {
-    Positive: "text-green-500",
-    Neutral: "text-amber-500",
-    Negative: "text-red-500",
+    Positive: "text-green-500", Neutral: "text-amber-500", Negative: "text-red-500",
   };
 
   return (
@@ -114,71 +129,54 @@ function SentimentCard({ qaScore, sentiment, response }: { qaScore: number | nul
           </div>
         )}
       </div>
-      {(escalated || resolved) && (
-        <div className="flex gap-3 mt-4 pt-3 border-t border-gray-100">
-          {escalated && (
-            <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${escalated === "Yes" ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}>
-              {escalated === "Yes" && <AlertTriangle className="w-3 h-3" />}
-              {escalated === "Yes" ? "Escalated" : "Not Escalated"}
-            </span>
-          )}
-          {resolved && (
-            <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${resolved === "Yes" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-              {resolved === "Yes" ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
-              {resolved === "Yes" ? "Resolved" : "Unresolved"}
-            </span>
-          )}
-        </div>
-      )}
+      <div className="flex gap-3 mt-4 pt-3 border-t border-gray-100">
+        <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${escalated === "Yes" ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"}`}>
+          {escalated === "Yes" && <AlertTriangle className="w-3 h-3" />}
+          {escalated === "Yes" ? "Escalated" : "Not Escalated"}
+        </span>
+        <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${resolved === "Yes" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+          {resolved === "Yes" ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+          {resolved === "Yes" ? "Resolved" : "Unresolved"}
+        </span>
+      </div>
     </div>
   );
 }
 
-function ActionCard({ response, riskLevel }: { response: string; riskLevel: string | null }) {
-  const actionMatch = response.match(/Action:\s*(\S+)/);
-  const recMatch = response.match(/Recommendation:\s*(.+?)(?:\n|---)/s);
-  const action = actionMatch ? actionMatch[1] : null;
-  const recommendation = recMatch ? recMatch[1].trim() : null;
+const RISK_ACTIONS: Record<string, string> = { HIGH: "LOYALTY_DISCOUNT", MEDIUM: "FOLLOWUP_48H", LOW: "MONITOR" };
 
-  const info = ACTION_INFO[action || ""];
+function ActionCard({ riskLevel }: { riskLevel: string | null }) {
+  const action = RISK_ACTIONS[riskLevel || "LOW"] || "MONITOR";
+  const info = ACTION_INFO[action];
   const ActionIcon = info?.icon || FileText;
-  const desc = info?.desc || action || "";
+  const desc = info?.desc || "";
   const isHighRisk = riskLevel === "HIGH";
+  const recommendation = isHighRisk
+    ? "Customer shows high churn risk. Recommend immediate outreach with retention offer."
+    : riskLevel === "MEDIUM"
+    ? "Customer shows moderate risk. Schedule proactive follow-up."
+    : "Customer appears stable. Continue monitoring.";
 
   return (
     <div className={`rounded-xl p-5 border shadow-sm ${isHighRisk ? "bg-red-50 border-red-300" : "bg-white border-gray-200"}`}>
       <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Recommended Action</h3>
-      {action ? (
-        <>
-          <div className="flex items-center gap-3 mb-2">
-            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isHighRisk ? "bg-red-200" : "bg-trilink-light/10"}`}>
-              <ActionIcon className={`w-5 h-5 ${isHighRisk ? "text-red-700" : "text-trilink-dark"}`} />
-            </div>
-            <div>
-              <span className="font-bold text-gray-800 text-lg">{action.replace(/_/g, " ")}</span>
-              <p className="text-sm text-gray-500">{desc}</p>
-            </div>
-          </div>
-          {recommendation && (
-            <p className="mt-3 text-sm text-gray-700 bg-gray-50 rounded-lg p-3 border border-gray-100">{recommendation}</p>
-          )}
-          {isHighRisk && (
-            <div className="mt-3 flex items-center gap-2 text-red-700 bg-red-100 rounded-lg p-3 text-sm font-semibold">
-              <AlertTriangle className="w-4 h-4" />
-              IMMEDIATE MANAGER REVIEW REQUIRED
-            </div>
-          )}
-        </>
-      ) : (
-        <p className="text-gray-400 italic">Run analysis to see recommendations</p>
+      <div className="flex items-center gap-3 mb-2">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isHighRisk ? "bg-red-200" : "bg-trilink-light/10"}`}>
+          <ActionIcon className={`w-5 h-5 ${isHighRisk ? "text-red-700" : "text-trilink-dark"}`} />
+        </div>
+        <div>
+          <span className="font-bold text-gray-800 text-lg">{action.replace(/_/g, " ")}</span>
+          <p className="text-sm text-gray-500">{desc}</p>
+        </div>
+      </div>
+      <p className="mt-3 text-sm text-gray-700 bg-gray-50 rounded-lg p-3 border border-gray-100">{recommendation}</p>
+      {isHighRisk && (
+        <div className="mt-3 flex items-center gap-2 text-red-700 bg-red-100 rounded-lg p-3 text-sm font-semibold">
+          <AlertTriangle className="w-4 h-4" /> IMMEDIATE MANAGER REVIEW REQUIRED
+        </div>
       )}
     </div>
   );
-}
-
-interface Customer {
-  id: string;
-  label: string;
 }
 
 function CustomerCombobox({ value, onChange }: { value: string; onChange: (id: string) => void }) {
@@ -193,7 +191,7 @@ function CustomerCombobox({ value, onChange }: { value: string; onChange: (id: s
       try {
         const res = await fetch(`${CHURN_API_URL}/customers?limit=100`);
         if (res.ok) setAllCustomers(await res.json());
-      } catch { /* backend not running yet */ }
+      } catch { /* backend not running */ }
       setLoading(false);
     }
     loadCustomers();
@@ -220,8 +218,13 @@ function CustomerCombobox({ value, onChange }: { value: string; onChange: (id: s
           className="w-full border border-gray-300 rounded-lg pl-3 pr-8 py-2 text-sm focus:ring-2 focus:ring-trilink-light focus:border-transparent outline-none"
           placeholder={loading ? "Loading customers..." : "Select or search customer..."}
           value={query || value || ""}
-          onChange={(e) => { setQuery(e.target.value); setOpen(true); onChange(""); }}
-          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            const val = e.target.value;
+            setQuery(val);
+            setOpen(true);
+            if (/^C\d{8}$/.test(val)) { onChange(val); } else { onChange(""); }
+          }}
+          onFocus={() => { setQuery(""); setOpen(true); }}
           disabled={loading}
         />
         <ChevronDown className="absolute right-2 top-2.5 w-4 h-4 text-gray-400 pointer-events-none" />
@@ -229,18 +232,13 @@ function CustomerCombobox({ value, onChange }: { value: string; onChange: (id: s
       {open && filtered.length > 0 && (
         <ul className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
           {filtered.slice(0, 20).map((c) => (
-            <li
-              key={c.id}
-              className="px-3 py-2 text-sm hover:bg-trilink-light/10 cursor-pointer border-b border-gray-50 last:border-0"
-              onClick={() => { onChange(c.id); setQuery(c.label); setOpen(false); }}
-            >
+            <li key={c.id} className="px-3 py-2 text-sm hover:bg-trilink-light/10 cursor-pointer border-b border-gray-50 last:border-0"
+              onClick={() => { onChange(c.id); setQuery(c.label); setOpen(false); }}>
               {c.label}
             </li>
           ))}
           {filtered.length > 20 && (
-            <li className="px-3 py-2 text-xs text-gray-400 text-center">
-              {filtered.length - 20} more — type to filter
-            </li>
+            <li className="px-3 py-2 text-xs text-gray-400 text-center">{filtered.length - 20} more — type to filter</li>
           )}
         </ul>
       )}
@@ -248,38 +246,258 @@ function CustomerCombobox({ value, onChange }: { value: string; onChange: (id: s
   );
 }
 
-export default function App() {
+// ── Analyze Tab ──────────────────────────────────────────────────────
+
+function AnalyzeTab() {
   const [customerId, setCustomerId] = useState("");
   const [transcript, setTranscript] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ChatResponse | null>(null);
+  const [result, setResult] = useState<PredictResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleAnalyze() {
     if (!customerId) { setError("Select a customer ID"); return; }
-    setLoading(true);
-    setError(null);
-    setResult(null);
-
+    setLoading(true); setError(null); setResult(null);
     try {
-      const message = transcript
-        ? `Analyze this call transcript for customer ${customerId}:\n\n${transcript}`
-        : `Predict churn risk for customer ${customerId} (no transcript available)`;
-
-      const res = await fetch(`${AGENT_API_URL}/chat`, {
+      const res = await fetch(`${CHURN_API_URL}/predict`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, customer_id: customerId }),
+        body: JSON.stringify({ customer_id: customerId }),
       });
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-      const data: ChatResponse = await res.json();
-      setResult(data);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        throw new Error(err.detail || `API error: ${res.status}`);
+      }
+      setResult(await res.json());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <div className="lg:col-span-2 space-y-4">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Phone className="w-4 h-4 text-gray-500" />
+            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Call Analysis</h2>
+          </div>
+          <CustomerCombobox value={customerId} onChange={setCustomerId} />
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Call Transcript <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-64 resize-none focus:ring-2 focus:ring-trilink-light focus:border-transparent outline-none"
+              placeholder="Paste call transcript here, or leave empty to predict from account data only..."
+              value={transcript} onChange={(e) => setTranscript(e.target.value)}
+            />
+          </div>
+          <button onClick={handleAnalyze} disabled={loading || !customerId}
+            className={`w-full mt-4 py-3 px-4 rounded-lg text-white font-semibold text-sm transition-all cursor-pointer flex items-center justify-center gap-2 ${
+              loading || !customerId ? "bg-gray-300 cursor-not-allowed" : "bg-trilink-dark hover:bg-trilink-mid shadow-md hover:shadow-lg"
+            }`}>
+            {loading ? (<><Loader2 className="w-4 h-4 animate-spin" />Analyzing...</>) : (<><Search className="w-4 h-4" />Analyze Call</>)}
+          </button>
+          {error && (
+            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />{error}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="lg:col-span-3 space-y-4">
+        {result ? (
+          <>
+            <RiskCard riskLevel={result.risk_level} churnProbability={result.churn_probability} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <SentimentCard result={result} />
+              <ActionCard riskLevel={result.risk_level} />
+            </div>
+          </>
+        ) : (
+          <div className="rounded-xl border-2 border-dashed border-gray-300 bg-white p-16 text-center">
+            <BarChart3 className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-400">No Analysis Yet</h3>
+            <p className="text-sm text-gray-400 mt-1">Select a customer and click Analyze Call to see results</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Chat Tab ─────────────────────────────────────────────────────────
+
+function ChatTab() {
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { role: "agent", text: "Hello! I'm the TriLink Retention Engine AI. I can help you:\n\n- Analyze churn risk for a customer (e.g., \"What's the risk for C00036458?\")\n- Show high-risk customers (e.g., \"Show me my top 5 high risk customers\")\n- Analyze a call transcript\n\nHow can I help you today?", timestamp: new Date() },
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  async function handleSend() {
+    if (!input.trim() || loading) return;
+    const userMsg: ChatMessage = { role: "user", text: input.trim(), timestamp: new Date() };
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setLoading(true);
+
+    const cidMatch = input.match(/C\d{8}/);
+    const customerId = cidMatch ? cidMatch[0] : undefined;
+    const lowerInput = input.toLowerCase();
+
+    try {
+      let agentText: string;
+
+      // Try agent service first
+      try {
+        const res = await fetch(`${AGENT_API_URL}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: input.trim(), customer_id: customerId }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          agentText = data.response || "Analysis complete.";
+          setMessages((prev) => [...prev, { role: "agent", text: agentText, timestamp: new Date() }]);
+          return;
+        }
+      } catch {
+        // Agent service not running — fall through to direct API calls
+      }
+
+      // Fallback: call churn predictor directly
+      if (customerId) {
+        const res = await fetch(`${CHURN_API_URL}/predict`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ customer_id: customerId }),
+        });
+        if (res.ok) {
+          const data: PredictResponse = await res.json();
+          const risk = data.risk_level;
+          const pct = Math.round(data.churn_probability * 100);
+          agentText = `Customer ${data.customer_id}\n\n` +
+            `Churn Risk: ${risk} (${pct}%)\n` +
+            `QA Score: ${data.qa_score}/10\n` +
+            `Sentiment: ${data.sentiment}\n` +
+            `Frustration: ${data.emotion_frustration.toFixed(2)} | Anger: ${data.emotion_anger.toFixed(2)}\n` +
+            `Sentiment Shift: ${data.sentiment_shift}\n` +
+            `Escalated: ${data.escalation_flag ? "Yes" : "No"} | Resolved: ${data.resolution_flag ? "Yes" : "No"}\n` +
+            `Call Data: ${data.has_call_data ? "Yes" : "No (using neutral defaults)"}\n\n` +
+            (risk === "HIGH" ? "This customer is at high risk of churning. Recommended action: LOYALTY DISCOUNT — 15% off for 6 months. IMMEDIATE MANAGER REVIEW REQUIRED." :
+             risk === "MEDIUM" ? "This customer shows moderate risk. Recommended: FOLLOW-UP call within 48 hours." :
+             "This customer appears stable. Continue monitoring.");
+        } else {
+          agentText = "I couldn't find that customer. Please check the ID and try again.";
+        }
+      } else if (lowerInput.includes("high risk") || lowerInput.includes("who should") || lowerInput.includes("top customer") || lowerInput.includes("leaderboard")) {
+        const res = await fetch(`${CHURN_API_URL}/high-risk?limit=5`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.length > 0) {
+            agentText = "Top High-Risk Customers:\n\n" +
+              data.map((c: Record<string, unknown>, i: number) =>
+                `${i + 1}. ${c.customer_id} — ${Math.round((c.churn_probability as number) * 100)}% risk | ${c.plan} $${c.monthly_cost}/mo | ${c.sentiment} | QA ${c.qa_score}/10`
+              ).join("\n") +
+              "\n\nThese customers should be prioritized for retention outreach.";
+          } else {
+            agentText = "No high-risk customers found at this time.";
+          }
+        } else {
+          agentText = "The high-risk query is processing. This can take a minute for the first request — try again shortly.";
+        }
+      } else {
+        agentText = "I can help you with:\n\n" +
+          "- Check a customer: \"What's the risk for C00036458?\"\n" +
+          "- High-risk list: \"Show me high risk customers\"\n" +
+          "- Analyze a transcript: paste it with a customer ID";
+      }
+
+      setMessages((prev) => [...prev, { role: "agent", text: agentText, timestamp: new Date() }]);
+    } catch {
+      setMessages((prev) => [...prev, { role: "agent", text: "Sorry, I'm having trouble connecting. Please check that the churn predictor API is running on port 8001.", timestamp: new Date() }]);
     } finally {
       setLoading(false);
     }
   }
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col" style={{ height: "calc(100vh - 200px)" }}>
+        {/* Chat messages */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div className={`max-w-[80%] rounded-xl px-4 py-3 ${
+                msg.role === "user"
+                  ? "bg-trilink-dark text-white rounded-br-sm"
+                  : "bg-gray-100 text-gray-800 rounded-bl-sm"
+              }`}>
+                <div className="flex items-center gap-2 mb-1">
+                  {msg.role === "agent" && <Wifi className="w-3 h-3 text-trilink-light" />}
+                  <span className="text-xs opacity-60">
+                    {msg.role === "agent" ? "Retention Engine AI" : "You"} — {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div className="text-sm whitespace-pre-wrap">{msg.text}</div>
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="flex justify-start">
+              <div className="bg-gray-100 rounded-xl px-4 py-3 rounded-bl-sm">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-trilink-light" />
+                  <span className="text-sm text-gray-500">Analyzing...</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input */}
+        <div className="border-t border-gray-200 p-4">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              className="flex-1 border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-trilink-light focus:border-transparent outline-none"
+              placeholder="Ask about a customer, request high-risk list, or paste a transcript..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+              disabled={loading}
+            />
+            <button
+              onClick={handleSend}
+              disabled={loading || !input.trim()}
+              className={`px-4 py-2.5 rounded-lg text-white transition-all flex items-center gap-2 ${
+                loading || !input.trim() ? "bg-gray-300 cursor-not-allowed" : "bg-trilink-dark hover:bg-trilink-mid cursor-pointer"
+              }`}
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 mt-2">
+            Try: "What's the churn risk for C00036458?" or "Show me high risk customers"
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ─────────────────────────────────────────────────────────
+
+export default function App() {
+  const [tab, setTab] = useState<"analyze" | "chat">("analyze");
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -295,89 +513,37 @@ export default function App() {
               <p className="text-xs text-trilink-light/70">Customer Intelligence Platform</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-sm text-gray-300">
-            <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-            System Online
+          <div className="flex items-center gap-4">
+            {/* Tab switcher */}
+            <div className="flex bg-trilink-mid/50 rounded-lg p-0.5">
+              <button
+                onClick={() => setTab("analyze")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                  tab === "analyze" ? "bg-white text-trilink-dark shadow-sm" : "text-white/70 hover:text-white"
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5" /> Analyze
+              </button>
+              <button
+                onClick={() => setTab("chat")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-1.5 cursor-pointer ${
+                  tab === "chat" ? "bg-white text-trilink-dark shadow-sm" : "text-white/70 hover:text-white"
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5" /> Chat
+              </button>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-gray-300">
+              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              System Online
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main */}
       <main className="max-w-7xl mx-auto px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-
-          {/* Left Panel */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <Phone className="w-4 h-4 text-gray-500" />
-                <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Call Analysis</h2>
-              </div>
-
-              <CustomerCombobox value={customerId} onChange={setCustomerId} />
-
-              <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Call Transcript <span className="text-gray-400 font-normal">(optional)</span>
-                </label>
-                <textarea
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-64 resize-none focus:ring-2 focus:ring-trilink-light focus:border-transparent outline-none"
-                  placeholder="Paste call transcript here, or leave empty to predict from account data only..."
-                  value={transcript}
-                  onChange={(e) => setTranscript(e.target.value)}
-                />
-              </div>
-
-              <button
-                onClick={handleAnalyze}
-                disabled={loading || !customerId}
-                className={`w-full mt-4 py-3 px-4 rounded-lg text-white font-semibold text-sm transition-all cursor-pointer flex items-center justify-center gap-2 ${
-                  loading || !customerId
-                    ? "bg-gray-300 cursor-not-allowed"
-                    : "bg-trilink-dark hover:bg-trilink-mid shadow-md hover:shadow-lg"
-                }`}
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Analyzing...
-                  </>
-                ) : (
-                  <>
-                    <Search className="w-4 h-4" />
-                    Analyze Call
-                  </>
-                )}
-              </button>
-
-              {error && (
-                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0" />
-                  {error}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right Panel */}
-          <div className="lg:col-span-3 space-y-4">
-            {result ? (
-              <>
-                <RiskCard riskLevel={result.risk_level} churnProbability={result.churn_probability} />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <SentimentCard qaScore={result.qa_score} sentiment={result.sentiment} response={result.response} />
-                  <ActionCard response={result.response} riskLevel={result.risk_level} />
-                </div>
-              </>
-            ) : (
-              <div className="rounded-xl border-2 border-dashed border-gray-300 bg-white p-16 text-center">
-                <BarChart3 className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold text-gray-400">No Analysis Yet</h3>
-                <p className="text-sm text-gray-400 mt-1">Select a customer and click Analyze Call to see results</p>
-              </div>
-            )}
-          </div>
-        </div>
+        {tab === "analyze" ? <AnalyzeTab /> : <ChatTab />}
       </main>
 
       {/* Footer */}
