@@ -11,6 +11,7 @@ SageMaker calls these functions:
 
 import json
 import os
+import pickle
 
 import numpy as np
 import xgboost as xgb
