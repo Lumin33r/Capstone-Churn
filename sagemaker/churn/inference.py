@@ -1,7 +1,8 @@
 """
-SageMaker inference script for the churn prediction model.
+SageMaker inference script for the XGBoost churn prediction model.
+Used with the SageMaker XGBoost container.
 
-SageMaker calls these four functions:
+SageMaker calls these functions:
 - model_fn: load the model from disk
 - input_fn: parse the incoming request
 - predict_fn: run the prediction
@@ -13,12 +14,13 @@ import os
 import pickle
 
 import numpy as np
+import xgboost as xgb
 
 
 def model_fn(model_dir):
-    """Load the model and supporting artifacts from the SageMaker model directory."""
-    import joblib
-    model = joblib.load(os.path.join(model_dir, "churn_model.joblib"))
+    """Load the XGBoost model and supporting artifacts."""
+    booster = xgb.Booster()
+    booster.load_model(os.path.join(model_dir, "xgboost-model"))
 
     with open(os.path.join(model_dir, "feature_columns.json")) as f:
         feature_columns = json.load(f)
@@ -27,7 +29,7 @@ def model_fn(model_dir):
         label_encoders = json.load(f)
 
     return {
-        "model": model,
+        "booster": booster,
         "feature_columns": feature_columns,
         "label_encoders": label_encoders,
     }
@@ -42,7 +44,7 @@ def input_fn(request_body, request_content_type):
 
 def predict_fn(input_data, model_artifacts):
     """Run prediction using the loaded model."""
-    model = model_artifacts["model"]
+    booster = model_artifacts["booster"]
     feature_columns = model_artifacts["feature_columns"]
     label_encoders = model_artifacts["label_encoders"]
 
@@ -56,10 +58,10 @@ def predict_fn(input_data, model_artifacts):
 
     # Build array in the correct column order
     row = [float(input_data.get(col, 0)) for col in feature_columns]
-    X = np.array([row])
+    dmatrix = xgb.DMatrix(np.array([row]), feature_names=feature_columns)
 
-    # Predict
-    proba = float(model.predict_proba(X)[0, 1])
+    # Predict probability
+    proba = float(booster.predict(dmatrix)[0])
     prediction = "churn" if proba >= 0.5 else "no_churn"
     risk_level = "HIGH" if proba >= 0.7 else "MEDIUM" if proba >= 0.4 else "LOW"
 
