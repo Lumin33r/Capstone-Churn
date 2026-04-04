@@ -10,14 +10,14 @@ SageMaker calls these four functions:
 
 import json
 import os
+import pickle
 
-import joblib
 import numpy as np
-import pandas as pd
 
 
 def model_fn(model_dir):
     """Load the model and supporting artifacts from the SageMaker model directory."""
+    import joblib
     model = joblib.load(os.path.join(model_dir, "churn_model.joblib"))
 
     with open(os.path.join(model_dir, "feature_columns.json")) as f:
@@ -52,13 +52,14 @@ def predict_fn(input_data, model_artifacts):
         if val in mapping:
             input_data[col] = mapping[val]
         else:
-            input_data[col] = 0  # fallback for unknown values
+            input_data[col] = 0
 
-    # Build DataFrame in the correct column order
-    df = pd.DataFrame([input_data], columns=feature_columns)
+    # Build array in the correct column order
+    row = [float(input_data.get(col, 0)) for col in feature_columns]
+    X = np.array([row])
 
     # Predict
-    proba = float(model.predict_proba(df)[0, 1])
+    proba = float(model.predict_proba(X)[0, 1])
     prediction = "churn" if proba >= 0.5 else "no_churn"
     risk_level = "HIGH" if proba >= 0.7 else "MEDIUM" if proba >= 0.4 else "LOW"
 

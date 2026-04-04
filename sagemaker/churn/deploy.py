@@ -40,6 +40,7 @@ MODEL_FILES = [
     os.path.join(SCRIPT_DIR, "feature_columns.json"),
 ]
 INFERENCE_SCRIPT = os.path.join(SCRIPT_DIR, "inference.py")
+SETUP_SCRIPT = os.path.join(SCRIPT_DIR, "setup.py")
 
 
 def package_model(tar_path: str) -> str:
@@ -48,7 +49,7 @@ def package_model(tar_path: str) -> str:
     with tarfile.open(tar_path, "w:gz") as tar:
         for filepath in MODEL_FILES:
             tar.add(filepath, arcname=os.path.basename(filepath))
-        # Include the inference script SageMaker will use
+        # inference.py goes at the root of the tar alongside model files
         tar.add(INFERENCE_SCRIPT, arcname="inference.py")
     print(f"  Created {tar_path}")
     return tar_path
@@ -79,6 +80,7 @@ def create_endpoint(s3_uri: str) -> None:
                 "ModelDataUrl": s3_uri,
                 "Environment": {
                     "SAGEMAKER_PROGRAM": "inference.py",
+                    "SAGEMAKER_SUBMIT_DIRECTORY": s3_uri,
                 },
             },
             ExecutionRoleArn=EXECUTION_ROLE_ARN,
