@@ -35,7 +35,7 @@ INSTANCE_TYPE = "ml.m5.large"
 # Model artifact paths (relative to this script)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_FILES = [
-    os.path.join(SCRIPT_DIR, "churn_model.joblib"),
+    os.path.join(SCRIPT_DIR, "xgboost-model"),
     os.path.join(SCRIPT_DIR, "label_encoders.json"),
     os.path.join(SCRIPT_DIR, "feature_columns.json"),
 ]
@@ -75,7 +75,7 @@ def create_endpoint(s3_uri: str) -> None:
         sm.create_model(
             ModelName=MODEL_NAME,
             PrimaryContainer={
-                "Image": f"683313688378.dkr.ecr.{REGION}.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3",
+                "Image": f"683313688378.dkr.ecr.{REGION}.amazonaws.com/sagemaker-xgboost:1.7-1",
                 "ModelDataUrl": s3_uri,
                 "Environment": {
                     "SAGEMAKER_PROGRAM": "inference.py",
@@ -90,7 +90,7 @@ def create_endpoint(s3_uri: str) -> None:
             sm.create_model(
                 ModelName=MODEL_NAME,
                 PrimaryContainer={
-                    "Image": f"683313688378.dkr.ecr.{REGION}.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3",
+                    "Image": f"683313688378.dkr.ecr.{REGION}.amazonaws.com/sagemaker-xgboost:1.7-1",
                     "ModelDataUrl": s3_uri,
                     "Environment": {
                         "SAGEMAKER_PROGRAM": "inference.py",
