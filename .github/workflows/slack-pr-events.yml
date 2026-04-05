@@ -1,0 +1,53 @@
+name: Slack PR Notifications
+
+on:
+  pull_request:
+    types: [opened, closed]
+
+permissions:
+  contents: read
+
+jobs:
+  notify-slack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Slack Notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref }}
+
+          ACTION: ${{ github.event.action }}
+          MERGED: ${{ github.event.pull_request.merged }}
+
+        run: |
+          if [[ "$ACTION" == "opened" ]]; then
+            MESSAGE="🚀 *New PR Submitted*\n
+            *PR:* <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n
+            *Author:* ${PR_AUTHOR}\n
+            *Branches:* ${SOURCE_BRANCH} → ${TARGET_BRANCH}"
+
+          elif [[ "$ACTION" == "closed" && "$MERGED" == "true" ]]; then
+            MESSAGE="✅ *PR Merged*\n
+            *PR:* <${PR_URL}|#${PR_NUMBER} ${PR_TITLE}>\n
+            *Submitted by:* ${PR_AUTHOR}\n
+            *Merged by:* ${MERGED_BY}\n
+            *PR Number:* #${PR_NUMBER}"
+
+          else
+            echo "Not a relevant event. Skipping..."
+            exit 0
+          fi
+
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\": \"$MESSAGE\"}" \
+          "$SLACK_WEBHOOK_URL"
