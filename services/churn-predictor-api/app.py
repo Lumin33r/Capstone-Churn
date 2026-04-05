@@ -55,7 +55,11 @@ class PredictRequest(BaseModel):
     customer_id: str
     qa_score: float = 5.0
     sentiment: str = "Neutral"
-    frustration_level: float = 5.0
+    emotion_frustration: float = 0.0
+    emotion_anger: float = 0.0
+    sentiment_shift: float = 0.0
+    escalation_flag: int = 0
+    resolution_flag: int = 1
 
 
 class PredictResponse(BaseModel):
@@ -121,7 +125,11 @@ def predict(req: PredictRequest):
             # Agent 1 features (from request)
             "qa_score": req.qa_score,
             "sentiment": req.sentiment,
-            "frustration_level": req.frustration_level,
+            "emotion_frustration": req.emotion_frustration,
+            "emotion_anger": req.emotion_anger,
+            "sentiment_shift": req.sentiment_shift,
+            "escalation_flag": req.escalation_flag,
+            "resolution_flag": req.resolution_flag,
         }
 
         # 4. Call SageMaker
