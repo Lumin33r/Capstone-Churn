@@ -1,12 +1,16 @@
 # services/agent-service/chains/retention_agent.py
 # The main LangChain agent that orchestrates the full retention analysis
-# Updated by Kathleen & Okino — 3-agent pipeline orchestration
+# Updated by Kathleen & Okino — 4-tool agent with memory
 
 from langchain_aws import ChatBedrock
 from langchain.agents import create_tool_calling_agent, AgentExecutor
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.runnables.history import RunnableWithMessageHistory
 from tools.qa_tool import analyze_call
 from tools.churn_tool import predict_churn
+from tools.high_risk_tool import get_high_risk_customers
+from tools.customer_tool import get_customer_details
 from dotenv import load_dotenv
 import os
 
@@ -16,24 +20,32 @@ MODEL_ID: str = os.getenv(key="MODEL_ID", default="us.anthropic.claude-haiku-4-5
 AWS_REGION: str = os.getenv(key="AWS_REGION", default="us-east-1")
 
 SYSTEM_PROMPT = """You are the Retention Engine AI for TriLink Telecom's customer support team.
-Your job is to analyze customer support calls and identify at-risk customers.
+You help retention managers analyze customer risk and take action to prevent churn.
 
-You have two tools:
-1. analyze_call — analyzes a transcript for sentiment, QA score, and emotional signals
-2. predict_churn — predicts churn probability using the QA analysis + account data
+You have four tools:
+1. get_customer_details — look up a customer's account info, plan, complaints, and call data
+2. analyze_call — analyze a transcript for sentiment, QA score, and emotional signals
+3. predict_churn — predict churn probability for a customer (uses account data + call signals)
+4. get_high_risk_customers — get a ranked list of the highest-risk customers
 
-WORKFLOW — follow these steps in order:
+ROUTING — choose the right approach based on the user's request:
 
-Step 1: When given a call transcript and customer_id, use analyze_call first.
-  This returns: qa_score, sentiment, emotion_frustration, emotion_anger,
-  sentiment_shift, escalation_flag, resolution_flag, category, confidence.
+If asked about a specific customer (e.g., "tell me about C00036458"):
+  1. Use get_customer_details to look up their account
+  2. Use predict_churn to get their risk score
+  3. Based on the risk level, recommend an approved action
 
-Step 2: Take ALL of those fields and pass them to predict_churn along with
-  the customer_id. The churn tool looks up account data internally.
-  This returns: churn_probability, prediction, risk_level.
+If asked to analyze a transcript:
+  1. Use analyze_call to get sentiment and QA score
+  2. Use predict_churn with the results + customer_id
+  3. Recommend an approved action based on risk level
 
-Step 3: Based on the combined results, select a recommendation from the
-  APPROVED ACTIONS below. Do NOT invent offers or plans that are not listed.
+If asked about high-risk customers, who to call, or a leaderboard:
+  → Use get_high_risk_customers to fetch the ranked list
+  → Present as a prioritized list with customer ID, risk %, plan, and sentiment
+
+If asked a general question about a customer you already discussed:
+  → Use your conversation memory — don't re-query unless asked to refresh
 
 TRILINK PRODUCT CATALOG:
   Internet Plans:
@@ -66,61 +78,64 @@ APPROVED RETENTION ACTIONS (choose one or combine based on risk level):
 
   LOW RISK (churn_probability < 0.40):
     - MONITOR: No retention action needed
-    - Note any positive agent performance for review
     Flag: None
 
-IMPORTANT: Only recommend actions from the lists above. Reference the
-customer's specific issues from the transcript when explaining why you
-chose each action.
-
-Always end your response in this exact format:
----
-Customer ID: [customer_id]
-QA Score: [X]/10
-Sentiment: [Positive/Neutral/Negative]
-Emotion - Frustration: [0-1] | Anger: [0-1]
-Sentiment Shift: [value]
-Escalated: [Yes/No] | Resolved: [Yes/No]
-Churn Risk: [LOW/MEDIUM/HIGH] ([probability as percentage]%)
-Action: [ACTION_CODE from approved list]
-Recommendation: [1-2 sentence explanation referencing the transcript]
----
+IMPORTANT: Only recommend actions from the lists above. Be conversational
+but precise. When presenting data, use clear formatting.
 """
 
+# Session-based chat history store
+_session_histories: dict[str, InMemoryChatMessageHistory] = {}
 
-def create_retention_agent() -> AgentExecutor:
-    """Creates and returns the configured LangChain agent executor."""
+
+def get_session_history(session_id: str) -> InMemoryChatMessageHistory:
+    if session_id not in _session_histories:
+        _session_histories[session_id] = InMemoryChatMessageHistory()
+    return _session_histories[session_id]
+
+
+def create_retention_agent() -> RunnableWithMessageHistory:
+    """Creates the agent with conversation memory."""
     llm = ChatBedrock(
         model=MODEL_ID,
         region=AWS_REGION,
         model_kwargs={"max_tokens": 1024, "temperature": 0},
     )
 
-    tools = [analyze_call, predict_churn]
+    tools = [get_customer_details, analyze_call, predict_churn, get_high_risk_customers]
 
     prompt = ChatPromptTemplate.from_messages(messages=[
         ("system", SYSTEM_PROMPT),
+        MessagesPlaceholder(variable_name="chat_history"),
         ("human", "{input}"),
         ("placeholder", "{agent_scratchpad}"),
     ])
 
     agent = create_tool_calling_agent(llm, tools, prompt)
 
-    return AgentExecutor(
+    executor = AgentExecutor(
         agent=agent,
         tools=tools,
         verbose=True,
-        max_iterations=5,
+        max_iterations=6,
         handle_parsing_errors=True,
     )
 
+    # Wrap with message history for conversation memory
+    return RunnableWithMessageHistory(
+        executor,
+        get_session_history,
+        input_messages_key="input",
+        history_messages_key="chat_history",
+    )
 
-# Singleton pattern — create once, reuse across requests
-_agent_executor: AgentExecutor | None = None
 
-def get_agent() -> AgentExecutor:
-    """Returns the shared agent instance, creating it on first call."""
-    global _agent_executor
-    if _agent_executor is None:
-        _agent_executor = create_retention_agent()
-    return _agent_executor
+# Singleton
+_agent: RunnableWithMessageHistory | None = None
+
+
+def get_agent() -> RunnableWithMessageHistory:
+    global _agent
+    if _agent is None:
+        _agent = create_retention_agent()
+    return _agent

@@ -54,6 +54,7 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     customer_id: str | None = None
+    session_id: str = "default"
 
 
 class ChatResponse(BaseModel):
@@ -82,7 +83,10 @@ async def chat(body: ChatRequest) -> ChatResponse:
         if body.customer_id:
             agent_input = f"Customer ID: {body.customer_id}\n\n{body.message}"
 
-        result = agent.invoke({"input": agent_input})
+        result = agent.invoke(
+            {"input": agent_input},
+            config={"configurable": {"session_id": body.session_id}},
+        )
         output = result.get("output", "")
 
         # Parse structured output
