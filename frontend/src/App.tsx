@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 
 const CHURN_API_URL = import.meta.env.VITE_CHURN_API_URL || "http://localhost:8001";
+const SENTIMENT_API_URL = import.meta.env.VITE_SENTIMENT_API_URL || "http://localhost:8000";
 const AGENT_API_URL = import.meta.env.VITE_AGENT_API_URL || "http://localhost:8000";
 
 // ── Types ────────────────────────────────────────────────────────────
