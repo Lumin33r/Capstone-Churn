@@ -1,0 +1,135 @@
+# .github/workflows/sagemaker-deploy.yml
+# Deploys and validates both SageMaker endpoints (churn XGBoost + sentiment DistilBERT)
+# Run AFTER terraform.yml has provisioned IAM roles and S3
+# See: CAPSTONE/docs/cicd-sagemaker-deploy.md
+
+name: SageMaker — Deploy Endpoints
+
+on:
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: "Which endpoint to deploy"
+        required: true
+        type: choice
+        options:
+          - both
+          - churn
+          - sentiment
+        default: both
+      action:
+        description: "Deploy or delete"
+        required: true
+        type: choice
+        options:
+          - deploy
+          - delete
+        default: deploy
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-endpoints:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install boto3 python-dotenv
+
+      # ── Deploy Churn Endpoint ───────────────────────────────────────
+      - name: Deploy Churn Endpoint
+        if: inputs.endpoint == 'both' || inputs.endpoint == 'churn'
+        working-directory: sagemaker/churn
+        run: |
+          if [ "${{ inputs.action }}" = "delete" ]; then
+            python deploy.py --delete
+          else
+            python deploy.py
+          fi
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+
+      # ── Deploy Sentiment Endpoint ───────────────────────────────────
+      - name: Deploy Sentiment Endpoint
+        if: inputs.endpoint == 'both' || inputs.endpoint == 'sentiment'
+        working-directory: sagemaker/sentiment
+        run: |
+          if [ "${{ inputs.action }}" = "delete" ]; then
+            python deploy.py --delete
+          else
+            python deploy.py
+          fi
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+
+      # ── Health Checks ───────────────────────────────────────────────
+      - name: Wait for Churn Endpoint
+        if: inputs.action == 'deploy' && (inputs.endpoint == 'both' || inputs.endpoint == 'churn')
+        run: |
+          ENDPOINT_NAME="churn-predictor-endpoint"
+          for i in $(seq 1 30); do
+            STATUS=$(aws sagemaker describe-endpoint \
+              --endpoint-name "$ENDPOINT_NAME" \
+              --query 'EndpointStatus' --output text 2>/dev/null || echo "NOT_FOUND")
+            echo "[$i/30] $ENDPOINT_NAME status: $STATUS"
+            if [ "$STATUS" = "InService" ]; then exit 0; fi
+            sleep 30
+          done
+          echo "❌ Timed out waiting for $ENDPOINT_NAME"
+          exit 1
+
+      - name: Wait for Sentiment Endpoint
+        if: inputs.action == 'deploy' && (inputs.endpoint == 'both' || inputs.endpoint == 'sentiment')
+        run: |
+          ENDPOINT_NAME="sentiment-analysis-endpoint"
+          for i in $(seq 1 30); do
+            STATUS=$(aws sagemaker describe-endpoint \
+              --endpoint-name "$ENDPOINT_NAME" \
+              --query 'EndpointStatus' --output text 2>/dev/null || echo "NOT_FOUND")
+            echo "[$i/30] $ENDPOINT_NAME status: $STATUS"
+            if [ "$STATUS" = "InService" ]; then exit 0; fi
+            sleep 30
+          done
+          echo "❌ Timed out waiting for $ENDPOINT_NAME"
+          exit 1
+
+      # ── Inference Validation ────────────────────────────────────────
+      - name: Validate Churn Inference
+        if: inputs.action == 'deploy' && (inputs.endpoint == 'both' || inputs.endpoint == 'churn')
+        run: |
+          PAYLOAD="2,100,78.0,150.5,5,2,3,1,450,0.65,35,75000,2,3,1,1,1,1,2,1800,350000,0.15,65000,1,5.0,1,0.3,0.1,0.0,0,1"
+          RESPONSE=$(aws sagemaker-runtime invoke-endpoint \
+            --endpoint-name churn-predictor-endpoint \
+            --content-type text/csv \
+            --body "$PAYLOAD" \
+            /dev/stdout 2>/dev/null)
+          echo "✅ Churn endpoint response: $RESPONSE"
+
+      - name: Validate Sentiment Inference
+        if: inputs.action == 'deploy' && (inputs.endpoint == 'both' || inputs.endpoint == 'sentiment')
+        run: |
+          PAYLOAD='{"inputs": "The customer expressed frustration about repeated billing errors."}'
+          RESPONSE=$(aws sagemaker-runtime invoke-endpoint \
+            --endpoint-name sentiment-analysis-endpoint \
+            --content-type application/json \
+            --body "$PAYLOAD" \
+            /dev/stdout 2>/dev/null)
+          echo "✅ Sentiment endpoint response: $RESPONSE"

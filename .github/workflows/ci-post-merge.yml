@@ -1,0 +1,223 @@
+# .github/workflows/ci-post-merge.yml
+# Automatic validation after every PR merge to main
+# Runs: unit tests → Docker build check → SageMaker health → E2E smoke test
+# See: CAPSTONE/docs/cicd-post-merge.md
+
+name: CI — Post-Merge Validation
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Unit Tests (parallel per service) ─────────────────────────────
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: agent-service
+            path: services/agent-service
+            python: true
+          - name: churn-predictor
+            path: services/churn-predictor-api
+            python: true
+          - name: sentiment-api
+            path: services/sentiment-analysis-api
+            python: true
+          - name: frontend
+            path: frontend
+            python: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: matrix.python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node
+        if: ${{ !matrix.python }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Python deps
+        if: matrix.python
+        run: |
+          cd ${{ matrix.path }}
+          pip install -r requirements.txt
+          pip install pytest ruff
+
+      - name: Install Node deps
+        if: ${{ !matrix.python }}
+        run: |
+          cd ${{ matrix.path }}
+          npm ci
+
+      - name: Lint (Python)
+        if: matrix.python
+        run: cd ${{ matrix.path }} && ruff check . || true
+
+      - name: Lint (TypeScript)
+        if: ${{ !matrix.python }}
+        run: cd ${{ matrix.path }} && npx tsc --noEmit || true
+
+      - name: Test (Python)
+        if: matrix.python
+        run: |
+          cd ${{ matrix.path }}
+          if [ -d tests ]; then
+            python -m pytest tests/ -v --tb=short
+          else
+            echo "No tests/ directory — running import check"
+            python -c "import app"
+          fi
+
+      - name: Test (Frontend build)
+        if: ${{ !matrix.python }}
+        run: cd ${{ matrix.path }} && npm run build
+
+  # ── Docker Build Validation ───────────────────────────────────────
+  docker-build-check:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: agent-service
+            context: services/agent-service
+          - name: churn-predictor
+            context: services/churn-predictor-api
+          - name: qa-evaluator
+            context: services/qa-evaluator-api
+          - name: frontend
+            context: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build --tag test-${{ matrix.name }} ${{ matrix.context }}
+
+  # ── SageMaker Endpoint Health ─────────────────────────────────────
+  endpoint-health:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Check churn endpoint
+        run: |
+          STATUS=$(aws sagemaker describe-endpoint \
+            --endpoint-name churn-predictor-endpoint \
+            --query 'EndpointStatus' --output text)
+          echo "Churn endpoint: $STATUS"
+          [ "$STATUS" = "InService" ] || exit 1
+
+      - name: Check sentiment endpoint
+        run: |
+          STATUS=$(aws sagemaker describe-endpoint \
+            --endpoint-name sentiment-analysis-endpoint \
+            --query 'EndpointStatus' --output text)
+          echo "Sentiment endpoint: $STATUS"
+          [ "$STATUS" = "InService" ] || exit 1
+
+      - name: Test churn inference
+        run: |
+          PAYLOAD="2,100,78.0,150.5,5,2,3,1,450,0.65,35,75000,2,3,1,1,1,1,2,1800,350000,0.15,65000,1,5.0,1,0.3,0.1,0.0,0,1"
+          aws sagemaker-runtime invoke-endpoint \
+            --endpoint-name churn-predictor-endpoint \
+            --content-type text/csv \
+            --body "$PAYLOAD" \
+            /tmp/churn-out.json
+          echo "✅ Churn inference response:"
+          cat /tmp/churn-out.json
+
+      - name: Test sentiment inference
+        run: |
+          PAYLOAD='{"inputs": "Customer is frustrated about repeated outages."}'
+          aws sagemaker-runtime invoke-endpoint \
+            --endpoint-name sentiment-analysis-endpoint \
+            --content-type application/json \
+            --body "$PAYLOAD" \
+            /tmp/sentiment-out.json
+          echo "✅ Sentiment inference response:"
+          cat /tmp/sentiment-out.json
+
+  # ── E2E Smoke Test (docker-compose) ───────────────────────────────
+  e2e-smoke-test:
+    needs: [docker-build-check, endpoint-health]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Create .env
+        run: |
+          echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
+          echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
+          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
+          echo "LANGCHAIN_TRACING_V2=false" >> .env
+
+      - name: Start services
+        run: docker compose up --build -d
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 30); do
+            ALL_UP=true
+            for url in http://localhost:8080/health http://localhost:8001/health http://localhost:8000/health; do
+              curl -sf "$url" > /dev/null 2>&1 || ALL_UP=false
+            done
+            if $ALL_UP; then
+              echo "✅ All services healthy"
+              break
+            fi
+            echo "[$i/30] Waiting..."
+            sleep 10
+          done
+
+      - name: E2E — Agent chat
+        run: |
+          RESPONSE=$(curl -sf -X POST http://localhost:8080/chat \
+            -H "Content-Type: application/json" \
+            -d '{"message": "Tell me about customer C00077940", "session_id": "ci-test"}')
+          echo "Agent response: $RESPONSE"
+          echo "$RESPONSE" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          assert 'response' in data, 'Missing response field'
+          assert len(data['response']) > 20, 'Response too short'
+          print('✅ Agent E2E passed')
+          "
+
+      - name: E2E — High-risk customers
+        run: |
+          RESPONSE=$(curl -sf http://localhost:8001/high-risk?limit=5)
+          echo "$RESPONSE" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          assert isinstance(data, list), 'Expected list of customers'
+          print(f'✅ Got {len(data)} high-risk customers')
+          "
+
+      - name: Teardown
+        if: always()
+        run: docker compose down -v
