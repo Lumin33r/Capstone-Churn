@@ -6,7 +6,7 @@ import httpx
 import os
 from langchain.tools import tool
 
-QA_URL = os.getenv(key="QA_EVALUATOR_URL", default="http://localhost:8000")
+SENTIMENT_URL = os.getenv(key="SENTIMENT_URL", default="http://localhost:8000")
 
 
 @tool
@@ -24,7 +24,7 @@ def analyze_call(transcript: str) -> str:
     """
     try:
         response = httpx.post(
-            url=f"{QA_URL}/predict",
+            url=f"{SENTIMENT_URL}/predict",
             json={"text": transcript},
             timeout=30.0,
         )

@@ -14,7 +14,7 @@ venv/
 
 # Environment variables — never commit
 .env
-.env.*
+!.env.example
 
 # Node
 node_modules/

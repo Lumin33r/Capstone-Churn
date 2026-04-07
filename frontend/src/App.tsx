@@ -541,9 +541,10 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main */}
+      {/* Main — both tabs stay mounted to preserve state */}
       <main className="max-w-7xl mx-auto px-6 py-6">
-        {tab === "analyze" ? <AnalyzeTab /> : <ChatTab />}
+        <div className={tab === "analyze" ? "" : "hidden"}><AnalyzeTab /></div>
+        <div className={tab === "chat" ? "" : "hidden"}><ChatTab /></div>
       </main>
 
       {/* Footer */}

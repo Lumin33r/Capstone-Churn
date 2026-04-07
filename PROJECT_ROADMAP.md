@@ -163,7 +163,7 @@ capstone/
 | 1 | Containers & Dockerfiles | George (backend, frontend), Kathleen/Okino (ML wrappers) | Troy (CI builds) |
 | 2 | Terraform Provisioning | George | — |
 | 3 | CI/CD with GitHub Actions | Troy | All contribute workflows |
-| 4 | LangChain Agentic Harness | George | Kathleen, Okino (tool contracts) |
+| 4 | LangChain Agentic Harness | Kathleen (LangGraph + LangSmith), George (initial scaffold) | Okino (tool contracts) |
 | 5 | Bedrock Chat Agent & Frontend | George (Bedrock/agent), All (frontend) | — |
 | 6 | SageMaker ML Endpoints | Okino (Endpoint 1: QA/Transcript), Kathleen (Endpoint 2: Churn) | George (integration) |
 | 7 | Kubernetes Orchestration | George | Troy (CI/CD deploy steps) |
@@ -515,8 +515,8 @@ Week 2 Focus:       Frontend     Frontend             Frontend
 | Terraform | Modular structure (separate modules) | Medium | George | Pending |
 | CI/CD | Separate CI workflows per service | Low | Troy | Placeholder files exist |
 | CI/CD | Branch targeting, rollback, multi-workflow chaining | Medium | Troy | Pending |
-| LangChain | LangGraph workflows | Medium | George | Pending |
-| LangChain | LangSmith observability | Medium | George | Pending |
+| LangChain | LangGraph workflows | Medium | Kathleen | ✅ Done — retention_graph.py |
+| LangChain | LangSmith observability | Medium | Kathleen | ✅ Done — retention-engine project |
 | Bedrock/Chat | Conversation memory persistence | Medium | Kathleen | ✅ InMemory done, mem0 stretch |
 | Bedrock/Chat | Polished UI (Tailwind/MUI) | Medium | Kathleen | ✅ Tailwind + Lucide |
 | SageMaker | Third endpoint or model versioning | Medium | Kathleen/Okino | Pending |
