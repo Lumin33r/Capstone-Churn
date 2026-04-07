@@ -10,6 +10,7 @@ from langchain_aws import ChatBedrock
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
+from langgraph.checkpoint.memory import MemorySaver
 
 from tools.qa_tool import analyze_call
 from tools.churn_tool import predict_churn
@@ -161,7 +162,7 @@ def build_retention_graph():
         "end": END,
     })
 
-    return graph.compile()
+    return graph.compile(checkpointer=MemorySaver())
 
 
 # ── Singleton ─────────────────────────────────────────────────────────
@@ -176,8 +177,8 @@ def get_graph():
     return _graph
 
 
-def invoke_graph(user_message: str, customer_id: str | None = None) -> str:
-    """Convenience function to invoke the graph with a user message."""
+def invoke_graph(user_message: str, customer_id: str | None = None, session_id: str = "default") -> str:
+    """Invoke the graph with conversation memory via thread_id."""
     graph = get_graph()
 
     initial_state: RetentionState = {
@@ -187,7 +188,8 @@ def invoke_graph(user_message: str, customer_id: str | None = None) -> str:
         "has_transcript": False,
     }
 
-    result = graph.invoke(initial_state)
+    config = {"configurable": {"thread_id": session_id}}
+    result = graph.invoke(initial_state, config=config)
 
     # Extract the last AI message
     for msg in reversed(result["messages"]):
