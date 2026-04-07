@@ -1,0 +1,11 @@
+{
+  "call_id": "CALL_000001",
+  "customer_id": "C00008949",
+  "agent_id": "agent_005",
+  "agent_name": "Lisa Wang",
+  "primary_scenario": "contract_renewal",
+  "call_transcript": "Thank you for calling TriLink Telecom, my name is Lisa...",
+  "customer_monthly_spend": 55,
+  "customer_service_count": 1,
+  "customer_issue_history": 6
+}

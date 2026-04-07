@@ -18,12 +18,13 @@ import json
 import os
 import time
 import tarfile
+import shutil
 
 import boto3
 import glob
-from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 from validator import valid_checks
+from pathlib import Path
 
 import atexit
 import concurrent.futures
@@ -71,12 +72,12 @@ CONTAINER_CANDIDATES = [
     # Hugging Faces (model is trained on distilbert)
     {
         "name": "huggingfaces",
-        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:1.13.1-transformers4.36.2-cpu"
+        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-vllm:0.17.0-transformers4.57.5-gpu-py312-cu129-ubuntu22.04"
     },
     # New Version of Hugging Faces 
     {
         "name": "huggingfaces-new",
-        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:2.1.0-transformers4.36.2-cpu"
+        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-vllm:0.14.0-transformers4.57.3-gpu-py312-cu129-ubuntu22.04"
     },
     # PyTorch Script Mode (great for NLP, public, supports custom inference.py)
     {
@@ -179,8 +180,32 @@ def package_model(tar_path: str) -> str:
                 tr.add(name=filepath, arcname=os.path.basename(p=filepath))
     
     print(f"  Created {tar_path}")
+    
+    shutil.rmtree(f"{SCRIPT_DIR}/exported_model")
+    print("Local folder deleted.")
+
     return tar_path
 
+
+def download_s3_folder() -> None:
+    """Get export model files for s3 to be zipped."""
+    s3 = boto3.client("s3", region_name=REGION)
+
+    paginator = s3.get_paginator("list_objects_v2")
+
+    
+    
+    for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=MODEL_PREFIX):
+        for obj in page.get("Contents", []):
+            s3_key = obj["Key"]
+            rel_path = s3_key[len(MODEL_PREFIX):].lstrip("/")
+            local_path = os.path.join(os.path.dirname(__file__), rel_path)
+            
+            os.makedirs(name=f"{SCRIPT_DIR}/exported_model", exist_ok=True)
+            
+            s3.download_file(S3_BUCKET, s3_key, local_path)
+
+    print("Download complete")
 
 def upload_to_s3(tar_path: str) -> str:
     """Upload model.tar.gz to S3 and return the S3 URI."""
@@ -441,10 +466,10 @@ if __name__ == "__main__":
     elif args.test:
         test_endpoint()
     else:
+        download_s3_folder()
+        valid_checks()
         tar_path = os.path.join(SCRIPT_DIR, "model.tar.gz")
         package_model(tar_path=tar_path)
         s3_uri = upload_to_s3(tar_path=tar_path)
-        create_endpoint(s3_uri=s3_uri)
-        valid_checks()
-        
+        create_endpoint(s3_uri=s3_uri) 
     atexit.register(shutdown_threads)

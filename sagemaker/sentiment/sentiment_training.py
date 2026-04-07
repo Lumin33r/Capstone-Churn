@@ -1,30 +1,10 @@
-# %% [markdown]
-# ## **Sentiment Analysis Model Training**
-# 
-# **Goal** : Train a model to perform a sentiment analysis on customer call transcripts.
-# 
-# **Datasets**:
-# 
-# * call_transcripts.csv  
-#   
-# **Steps**:
-# 
-# 1. Load & explore data
-# 2. Feature engineering & preprocessing
-# 3. Train/test split
-# 4. Train model
-# 5. Evaluate performance
-# 6. Invoke Model
-
 # %%
-# %pip install boto3
+%pip install boto3
 # %pip install s3fs
 # %pip install sagemaker
-# %pip install "transformers==4.36.2" "accelerate==0.24.1"
+# %pip install "transformers==4.26.0" "accelerate==0.17.1"
 # %pip install datasets
-# %pip install accelerate
-%pip install transformers
-%pip install accelerate
+
 
 import pandas as pd
 import numpy as np
@@ -32,6 +12,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 import os
+import boto3
 import json
 from typing import Any, NoReturn, Literal
 from transformers import (AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments)
@@ -133,7 +114,7 @@ def sanitize_transcript(text) -> str | None | Literal['']:
     return text
 
 df["clean_transcript"] = df["call_transcript"].apply(func=sanitize_transcript)
-df["clean_transcript"].iloc[0]
+df["clean_transcript"].iloc[0][:100]
 
 # %%
 def engineer_features(df) -> Any:
@@ -268,8 +249,9 @@ training_args = TrainingArguments(
     logging_dir='./sentiment_logs',
     evaluation_strategy="epoch",
     save_strategy="epoch",
-    save_total_limit=1,
+    save_total_limit=None,
     save_safetensors=False,
+    save_only_model=True,
     learning_rate=2e-5,
     per_device_train_batch_size=8,
     per_device_eval_batch_size=8,
@@ -296,8 +278,7 @@ def compute_metrics(eval_pred) -> dict[str, Any]:
     return {
         "accuracy": accuracy_score(y_true=labels, y_pred=preds),
         "f1_macro": f1_score(y_true=labels, y_pred=preds, average="macro"),
-        "recall": recall_score(y_true=labels, y_pred=preds, average="macro")
-        
+        "recall": recall_score(y_true=labels, y_pred=preds, average="macro")  
     }
 
 
@@ -804,8 +785,28 @@ df_features.head()
 
 # %%
 
-trainer.save_model(output_dir="./exported_model")
-tokenizer.save_pretrained("./exported_model")
+from dotenv import load_dotenv
+
+load_dotenv()
+
+S3_BUCKET: str = os.getenv(key="S3_BUCKET", default="retention-engine-bucket")
+MODEL_PREFIX: str = os.getenv(key="MODEL_PREFIX", default="models/sentiment")
+
+export_dir = "exported_model"
+
+model.save_pretrained(export_dir, safe_serialization=False)
+tokenizer.save_pretrained(export_dir)
+
+s3 = boto3.client("s3")
+
+
+for root, dirs, files in os.walk(top=export_dir):
+    for file in files:
+        local_path = os.path.join(root, file)
+        s3_path = f"{MODEL_PREFIX}/{export_dir}/{file}"
+        s3.upload_file(local_path, S3_BUCKET, s3_path)
+
+print("Upload complete.")
 
 
 # %%
@@ -1119,16 +1120,6 @@ with open(file="sentiment_columns.json", mode="w") as f:
 
 print("Sentiment columns saved to sentiment_columns.json")
 
-
-# %%
-# TODO: Implement S3 data loading if needed
-# s3 = boto3.client(service_name="s3")
-# bucket = "retention-engine-bucket"
-# key = "data/call_transcripts.csv"
-# Download to local notebook environment
-# s3.download_file(Bucket=bucket, Key=key, Filename="call_transcripts.csv")
-# Read directly to memory
-# df = pd.read_csv(filepath_or_buffer=s3.get_object(Bucket=bucket, Key=key)["Body"])
 
 # %%
 # Load the schema for inclusion in predictions
