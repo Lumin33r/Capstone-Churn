@@ -12,7 +12,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
 
-from tools.qa_tool import analyze_call
+from tools.sentiment_tool import analyze_call
 from tools.churn_tool import predict_churn
 from tools.high_risk_tool import get_high_risk_customers
 from tools.customer_tool import get_customer_details

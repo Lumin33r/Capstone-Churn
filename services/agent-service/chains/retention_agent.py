@@ -7,7 +7,7 @@ from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
-from tools.qa_tool import analyze_call
+from tools.sentiment_tool import analyze_call
 from tools.churn_tool import predict_churn
 from tools.high_risk_tool import get_high_risk_customers
 from tools.customer_tool import get_customer_details
