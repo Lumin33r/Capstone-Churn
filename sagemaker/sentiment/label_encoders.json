@@ -1,0 +1,42 @@
+{
+  "agent_id": {
+    "agent_001": 0,
+    "agent_002": 1,
+    "agent_003": 2,
+    "agent_004": 3,
+    "agent_005": 4,
+    "agent_006": 5,
+    "agent_007": 6,
+    "agent_008": 7,
+    "agent_009": 8,
+    "agent_010": 9
+  },
+  "agent_name": {
+    "Ashley Johnson": 0,
+    "Carlos Martinez": 1,
+    "David Chen": 2,
+    "James Thompson": 3,
+    "Jennifer Davis": 4,
+    "Lisa Wang": 5,
+    "Maria Rodriguez": 6,
+    "Michael Brown": 7,
+    "Robert Kim": 8,
+    "Sarah Mitchell": 9
+  },
+  "primary_scenario": {
+    "billing_inquiry": 0,
+    "complaint_resolution": 1,
+    "contract_renewal": 2,
+    "cross_sell_internet": 3,
+    "cross_sell_mobile": 4,
+    "cross_sell_security": 5,
+    "equipment_replacement": 6,
+    "general_inquiry": 7,
+    "payment_assistance": 8,
+    "service_cancellation": 9,
+    "service_downgrade": 10,
+    "service_upgrade": 11,
+    "technical_support": 12,
+    "upsell_security_devices": 13
+  }
+}
