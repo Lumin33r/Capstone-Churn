@@ -52,19 +52,23 @@ INSTANCE_TYPE = "ml.t2.medium"
 # Model artifact paths (relative to this script)
 SCRIPT_DIR: str = os.path.dirname(p=os.path.abspath(path=__file__))
 MODEL_PATHS: list[str] = [
-    os.path.join(SCRIPT_DIR, "inference.py"),
-    os.path.join(SCRIPT_DIR, "exported_model/*"),
-    os.path.join(SCRIPT_DIR, "requirements.txt"),
+    os.path.join(f"{SCRIPT_DIR}/model", "inference.py"),
+    os.path.join(SCRIPT_DIR, "model/*"),
+    os.path.join(f"{SCRIPT_DIR}/model", "requirements.txt"),
     # os.path.join(SCRIPT_DIR, "feature_columns.json"),
     # os.path.join(SCRIPT_DIR, "label_encoders.json"),
     # os.path.join(SCRIPT_DIR, "label_encoding_schema.json"),
     # os.path.join(SCRIPT_DIR, "sentiment_columns.json"),
     # os.path.join(SCRIPT_DIR, "sentiment_encoders.json"),
-    os.path.join(SCRIPT_DIR, "sentiment_schema.json")
+    os.path.join(f"{SCRIPT_DIR}/model", "sentiment_schema.json")
 ]
 
 def shutdown_threads() -> None:
-    concurrent.futures.thread._threads_queues.clear() # type: ignore
+    try:
+        concurrent.futures.thread._python_exit()
+        concurrent.futures.thread._shutdown
+    except:
+        pass
     
 
 # Container priority 
@@ -72,12 +76,12 @@ CONTAINER_CANDIDATES = [
     # Hugging Faces (model is trained on distilbert)
     {
         "name": "huggingfaces",
-        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-vllm:0.17.0-transformers4.57.5-gpu-py312-cu129-ubuntu22.04"
+        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:2.6.0-transformers4.49.0-cpu-py312-ubuntu22.04"
     },
     # New Version of Hugging Faces 
     {
         "name": "huggingfaces-new",
-        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-vllm:0.14.0-transformers4.57.3-gpu-py312-cu129-ubuntu22.04"
+        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:2.6.0-transformers4.49.0-cpu-py312-ubuntu22.04"
     },
     # PyTorch Script Mode (great for NLP, public, supports custom inference.py)
     {

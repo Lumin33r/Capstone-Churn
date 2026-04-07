@@ -31,4 +31,4 @@ sagemaker/*/data/*.csv
 
 # Model Training Artifacts
 sagemaker/*/sentiment_model/*
-sagemaker/model.tar.gz
+sagemaker/*/model.tar.gz
