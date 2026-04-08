@@ -9,6 +9,14 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  backend "s3" {
+    bucket         = "retention-engine-tf-state"
+    key            = "terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "retention-engine-tf-lock"
+    encrypt        = true
+  }
 }
 
 provider "aws" {
