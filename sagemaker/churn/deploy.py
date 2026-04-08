@@ -70,6 +70,17 @@ def create_endpoint(s3_uri: str) -> None:
     """Create SageMaker model, endpoint config, and endpoint."""
     sm = boto3.client("sagemaker", region_name=REGION)
 
+    # Skip if endpoint already healthy
+    try:
+        resp = sm.describe_endpoint(EndpointName=ENDPOINT_NAME)
+        status = resp["EndpointStatus"]
+        if status == "InService":
+            print(f"Endpoint {ENDPOINT_NAME} already InService, skipping redeployment.")
+            return
+        print(f"Endpoint {ENDPOINT_NAME} exists but status is {status}, redeploying...")
+    except sm.exceptions.ClientError:
+        print(f"Endpoint {ENDPOINT_NAME} not found, creating...")
+
     # 1. Create SageMaker Model
     print(f"Creating SageMaker model: {MODEL_NAME}...")
     try:
