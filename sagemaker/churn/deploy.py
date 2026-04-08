@@ -33,14 +33,13 @@ EXECUTION_ROLE_ARN = os.environ.get(
 INSTANCE_TYPE = "ml.m5.large"
 
 # Model artifact paths (relative to this script)
+# IMPORTANT: Native XGBoost serving — tar.gz must contain ONLY the
+# xgboost-model binary. Including inference.py or JSON files causes
+# the container to try loading them as models and fail.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_FILES = [
     os.path.join(SCRIPT_DIR, "xgboost-model"),
-    os.path.join(SCRIPT_DIR, "label_encoders.json"),
-    os.path.join(SCRIPT_DIR, "feature_columns.json"),
 ]
-INFERENCE_SCRIPT = os.path.join(SCRIPT_DIR, "inference.py")
-SETUP_SCRIPT = os.path.join(SCRIPT_DIR, "setup.py")
 
 
 def package_model(tar_path: str) -> str:
@@ -49,8 +48,6 @@ def package_model(tar_path: str) -> str:
     with tarfile.open(tar_path, "w:gz") as tar:
         for filepath in MODEL_FILES:
             tar.add(filepath, arcname=os.path.basename(filepath))
-        # inference.py goes at the root of the tar alongside model files
-        tar.add(INFERENCE_SCRIPT, arcname="inference.py")
     print(f"  Created {tar_path}")
     return tar_path
 
@@ -72,17 +69,14 @@ def create_endpoint(s3_uri: str) -> None:
 
     # 1. Create SageMaker Model
     print(f"Creating SageMaker model: {MODEL_NAME}...")
+    container_config = {
+        "Image": f"683313688378.dkr.ecr.{REGION}.amazonaws.com/sagemaker-xgboost:1.7-1",
+        "ModelDataUrl": s3_uri,
+    }
     try:
         sm.create_model(
             ModelName=MODEL_NAME,
-            PrimaryContainer={
-                "Image": f"683313688378.dkr.ecr.{REGION}.amazonaws.com/sagemaker-xgboost:1.7-1",
-                "ModelDataUrl": s3_uri,
-                "Environment": {
-                    "SAGEMAKER_PROGRAM": "inference.py",
-                    "SAGEMAKER_SUBMIT_DIRECTORY": s3_uri,
-                },
-            },
+            PrimaryContainer=container_config,
             ExecutionRoleArn=EXECUTION_ROLE_ARN,
         )
     except sm.exceptions.ClientError as e:
@@ -91,13 +85,7 @@ def create_endpoint(s3_uri: str) -> None:
             sm.delete_model(ModelName=MODEL_NAME)
             sm.create_model(
                 ModelName=MODEL_NAME,
-                PrimaryContainer={
-                    "Image": f"683313688378.dkr.ecr.{REGION}.amazonaws.com/sagemaker-xgboost:1.7-1",
-                    "ModelDataUrl": s3_uri,
-                    "Environment": {
-                        "SAGEMAKER_PROGRAM": "inference.py",
-                    },
-                },
+                PrimaryContainer=container_config,
                 ExecutionRoleArn=EXECUTION_ROLE_ARN,
             )
         else:
