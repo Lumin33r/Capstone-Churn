@@ -144,10 +144,12 @@ Included docker-compose additions for OTel Collector, Tempo, Prometheus, and Gra
 **What I asked:** Debug `terraform apply` failures (EntityAlreadyExists on all IAM roles + S3 bucket, invalid ECR repo policy). Then set up remote state.
 
 **LLM analysis:**
+
 - Identified root cause: Terraform was using **local state** (no `backend` block in `providers.tf`), so GitHub Actions runners had no memory of previous applies. Resources created manually or by prior runs weren't tracked.
 - Identified the `aws_ecr_repository_policy` targeting `763104351884/*` (AWS's public SageMaker registry) as invalid — you can't set policies on repos you don't own.
 
 **Changes made:**
+
 1. Added S3 backend + DynamoDB lock table to `providers.tf`:
    ```hcl
    backend "s3" {
@@ -172,13 +174,13 @@ Included docker-compose additions for OTel Collector, Tempo, Prometheus, and Gra
 
 **LLM analysis:** Found 5 mismatches between `sagemaker.tf` definitions and the actual deployed resources (created by `sagemaker/sentiment/deploy.py`):
 
-| Setting | Terraform had | Actually deployed |
-|---|---|---|
-| Execution role | `sagemaker-execution-role` | `retention/retention-sagemaker-execution-role` |
-| Container image | `pytorch-inference:2.0.0-cpu-py310` | `huggingface-pytorch-inference:2.6.0-transformers4.49.0-cpu-py312-ubuntu22.04` |
-| Model data | *(none)* | `s3://retention-engine-bucket/models/sentiment/model.tar.gz` |
-| Environment vars | `HF_MODEL_ID` + `HF_TASK` | `SAGEMAKER_PROGRAM=inference.py` |
-| Variant name | `AllTraffic` | `primary` |
+| Setting          | Terraform had                       | Actually deployed                                                              |
+| ---------------- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| Execution role   | `sagemaker-execution-role`          | `retention/retention-sagemaker-execution-role`                                 |
+| Container image  | `pytorch-inference:2.0.0-cpu-py310` | `huggingface-pytorch-inference:2.6.0-transformers4.49.0-cpu-py312-ubuntu22.04` |
+| Model data       | _(none)_                            | `s3://retention-engine-bucket/models/sentiment/model.tar.gz`                   |
+| Environment vars | `HF_MODEL_ID` + `HF_TASK`           | `SAGEMAKER_PROGRAM=inference.py`                                               |
+| Variant name     | `AllTraffic`                        | `primary`                                                                      |
 
 **Changes made:** Updated `sagemaker.tf` to match the actual deployed state — execution role ARN, container image, model data URL, environment variables, and variant name.
 
