@@ -251,6 +251,21 @@ Used Claude Code as a pair programming partner throughout the capstone project. 
 ### 18. Not Making Assumptions About Teammate's Code
 **My guidance:** When Claude offered to rewrite Okino's qa_tool.py to call his SageMaker endpoint directly, I said "No, I don't want to make those assumptions. We will work it through this evening."
 
+### 19. Frankenstein PR — Cherry-Picking Across Branches
+**Situation:** Okino's PR #46 had useful new sentiment files but also deleted our working code and restructured directories. PR #47 had our LangGraph/LangSmith work. Neither could merge cleanly.
+**My guidance:** Asked Claude to cherry-pick Okino's sentiment files from his branch, combine with our code from backups, and create a single consolidated PR #48. Closed both #46 and #47.
+**Outcome:** Clean PR with all components working together. Required manual verification that every file from both PRs was included.
+
+### 20. Defending Working Code
+**Situation:** Troy and Okino suggested uploading label encoders to S3 and restructuring the endpoint invocation pattern.
+**My guidance:** "The label encoders are already hardcoded in app.py and the endpoint is live and tested. Don't restructure something that's working."
+**Outcome:** Kept the working implementation. Avoided unnecessary complexity before presentation.
+
+### 21. Model Drift as Stretch Goal
+**My question:** "Is there SageMaker model drift tracking we can implement?"
+**Claude's options:** Full SageMaker Model Monitor (4+ hours) vs lightweight `/drift` endpoint (30 min).
+**My decision:** Added to roadmap as stretch goal rather than implementing now — presentation prep is higher priority.
+
 ---
 
 ### What I Would Do Differently
