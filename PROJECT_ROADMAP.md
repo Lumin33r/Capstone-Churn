@@ -472,6 +472,12 @@ Presentation Day                   ███████████████
 
 - [ ] Amazon Transcribe pipeline: S3 audio → Transcribe → feed to agent
 - [ ] Amazon Polly: text-to-speech for agent responses
+- [ ] Model drift tracking — lightweight `/drift` endpoint in churn predictor:
+  - Log prediction distributions over time (rolling window)
+  - Compare incoming feature distributions to training baselines
+  - Return drift metrics (mean shift, distribution divergence)
+  - Alert when predictions skew beyond threshold
+  - No SageMaker Model Monitor needed — runs inside the FastAPI wrapper
 
 ### Documentation (All Members)
 
