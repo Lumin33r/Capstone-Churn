@@ -1,0 +1,129 @@
+# .github/workflows/deploy.yml
+# Builds Docker images, pushes to GHCR, and rolls out to EKS
+# Run AFTER terraform.yml and sagemaker-deploy.yml
+# See: CAPSTONE/docs/cicd-deploy.md
+
+name: Deploy — Build & Roll Out to EKS
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Which service to deploy"
+        required: true
+        type: choice
+        options:
+          - all
+          - agent-service
+          - churn-predictor
+          - qa-evaluator
+          - frontend
+        default: all
+      tag:
+        description: "Docker image tag"
+        required: false
+        type: string
+        default: latest
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/lumin33r
+
+jobs:
+  # ── Build & Push Docker Images ────────────────────────────────────
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: agent-service
+            context: services/agent-service
+          - name: churn-predictor
+            context: services/churn-predictor-api
+          - name: qa-evaluator
+            context: services/qa-evaluator-api
+          - name: frontend
+            context: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if not selected
+        id: check
+        run: |
+          if [[ "${{ inputs.service }}" != "all" && "${{ inputs.service }}" != "${{ matrix.name }}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Login to GHCR
+        if: steps.check.outputs.skip == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        if: steps.check.outputs.skip == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:${{ inputs.tag }}
+
+  # ── Deploy to EKS ────────────────────────────────────────────────
+  deploy-to-eks:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+
+      - name: Apply K8s manifests
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/namespace-quota.yaml
+          kubectl apply -f k8s/configmaps/
+          kubectl apply -f k8s/secrets.yaml
+          kubectl apply -f k8s/deployments/
+          kubectl apply -f k8s/services/
+
+      - name: Restart deployments (pull latest image)
+        run: |
+          for dep in agent-service churn-predictor qa-evaluator frontend-deployment; do
+            kubectl rollout restart deployment/$dep -n retention-engine || true
+          done
+
+      - name: Wait for rollout
+        run: |
+          for dep in agent-service churn-predictor qa-evaluator; do
+            echo "Waiting for $dep..."
+            kubectl rollout status deployment/$dep -n retention-engine --timeout=120s
+          done
+
+      - name: Smoke test agent health
+        run: |
+          AGENT_URL=$(kubectl get svc agent-service -n retention-engine \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "Agent service URL: $AGENT_URL"
+          curl -sf --retry 5 --retry-delay 10 "http://${AGENT_URL}:8080/health"
+          echo "✅ Agent service is healthy"
