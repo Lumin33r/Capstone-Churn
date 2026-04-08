@@ -202,6 +202,212 @@ Included docker-compose additions for OTel Collector, Tempo, Prometheus, and Gra
 
 ---
 
+### 12. Workflow Debugging — Missing GitHub Secrets
+
+**What I asked:** Debug failing `sagemaker-deploy.yml` workflow runs.
+
+**LLM analysis:** Two consecutive failures, same root cause pattern:
+
+1. **Run 1:** `S3_BUCKET` secret not set → `botocore.exceptions.ParamValidationError: Invalid bucket name ""`. The workflow passes `S3_BUCKET: ${{ secrets.S3_BUCKET }}` as an env var, but when the secret is empty, Python's `os.environ.get("S3_BUCKET", "default")` receives an empty string (not `None`), so the fallback never triggers.
+2. **Run 2:** `SAGEMAKER_ROLE_ARN` secret not set → `ParamValidationError: Invalid length for parameter ExecutionRoleArn, value: 0, valid min length: 20`. Same empty-string-override pattern.
+
+**Fixes applied:**
+
+```bash
+gh secret set S3_BUCKET --body "retention-engine-bucket"
+gh secret set SAGEMAKER_ROLE_ARN --body "arn:aws:iam::388691194728:role/retention/retention-sagemaker-execution-role"
+```
+
+**My evaluation:** Straightforward diagnosis — the error messages pointed exactly to the problem. Key lesson: GitHub Actions sets env vars to empty strings when secrets are missing, which defeats Python's default-value fallback. All required secrets should be set before first workflow run.
+
+---
+
+### 13. SageMaker Deploy Script Optimization — Skip Healthy Endpoints
+
+**What I asked:** The `sagemaker-deploy.yml` run was taking 6+ minutes on "Deploy Churn Endpoint" even though the endpoints already exist and are healthy. Add early-exit logic.
+
+**LLM output:** Added a `describe_endpoint` check at the top of `create_endpoint()` in both `sagemaker/churn/deploy.py` and `sagemaker/sentiment/deploy.py`:
+
+- If endpoint status is `InService` → print skip message and return immediately
+- If endpoint exists but unhealthy → proceed with redeployment
+- If endpoint doesn't exist → proceed with full creation
+
+**My evaluation:** Clean optimization. Avoids the 5-10 minute `update_endpoint` + waiter cycle when nothing has changed. The sentiment script also skips `get_iam_role()` and `select_best_container()` calls in the early-exit path, saving additional API calls.
+
+---
+
+### 14. Endpoint Update Loop — Handling In-Progress States
+
+**What I asked:** Workflow kept failing with `WaiterError: Max attempts exceeded` on Deploy Churn Endpoint (14m 54s). The skip check wasn't catching it.
+
+**LLM analysis:** The endpoint was stuck in `Updating` from a previous failed run. The initial skip logic only handled `InService` — when it saw `Updating`, it fell through and tried to `update_endpoint` on an already-updating endpoint, which SageMaker rejects.
+
+**LLM fix:** Updated both `deploy.py` scripts to handle three states:
+
+- `InService` → skip immediately
+- `Updating` / `Creating` → wait for the in-progress operation to finish, then return
+- `Failed` / other → proceed with full redeployment
+
+**My evaluation:** Good defensive coding. The `Updating` state is a real edge case that surfaces when CI runs overlap or retry after failures.
+
+---
+
+### 15. CloudWatch Log Diagnosis — Missing setup.py in Model Tar
+
+**What I asked:** The churn endpoint was stuck failing health checks despite the model tar having the right files. Why?
+
+**LLM analysis:** Pulled CloudWatch logs for the endpoint and found the root cause:
+
+```
+sagemaker_containers._errors.ImportModuleError: No module named 'inference'
+```
+
+The XGBoost container uses `SAGEMAKER_PROGRAM=inference.py` and needs `setup.py` to install `inference` as an importable module. `deploy.py` defined `SETUP_SCRIPT` but never added it to the tar.
+
+**LLM fix:** Added `tar.add(SETUP_SCRIPT, arcname="setup.py")` to `package_model()`.
+
+**Additional actions:** Since the endpoint was stuck in an `Updating` loop with the bad model, the LLM waited for it to settle back to `InService` (SageMaker rolled back to previous config), then deleted the endpoint/config/model to allow a clean fresh deploy.
+
+**My evaluation:** Good root cause analysis. The CloudWatch log pull was the right move — the Python traceback on the CI runner only showed the waiter timeout, not _why_ the container failed. The `setup.py` was defined but unused — a bug in the original `deploy.py` that was masked because the previous manually-deployed model tar already had it.
+
+---
+
+### 16. Sentiment Deploy — Missing `packaging` Module
+
+**What I asked:** After churn passed, sentiment deploy failed with `ModuleNotFoundError: No module named 'packaging'`.
+
+**LLM fix:** Added `packaging` to the workflow's pip install step: `pip install boto3 python-dotenv packaging`.
+
+**My evaluation:** Fast fix. The sentiment `deploy.py` imports `validator.py` which uses `from packaging import version`. The workflow's dependency list was incomplete.
+
+---
+
+### 17. Skip Logic Placement Bug — Packaging Before Checking
+
+**What I asked:** Workflow runs were uploading a new (broken) model tar and deleting the working one, even when the endpoint was already InService.
+
+**LLM analysis:** The skip check was inside `create_endpoint()`, but `package_model()` and `upload_to_s3()` ran _before_ it in `__main__`. This meant every CI run:
+
+1. Rebuilt the tar (potentially with bugs)
+2. Uploaded it to S3 (overwriting the working model)
+3. _Then_ checked if the endpoint was healthy
+
+**LLM fix:** Moved the `describe_endpoint` skip logic to the top of `__main__`, before any packaging or upload calls. Both `churn/deploy.py` and `sentiment/deploy.py` updated.
+
+**My evaluation:** Critical fix. The ordering bug meant that even "successful" skip runs were silently replacing good model artifacts with potentially bad ones. This was the root cause of the 500 errors — a working endpoint got its model tar overwritten, then SageMaker rolled back to the overwritten (broken) version on the next update.
+
+---
+
+### 18. invoke-endpoint CLI Fixes — /dev/stdout and Base64
+
+**What I asked:** Inference validation step failing with exit code 255 on GitHub runners.
+
+**LLM analysis:** Two issues:
+
+1. **`/dev/stdout` as output file:** AWS CLI v2 on GitHub runners rejects `/dev/stdout` as an output path. Fixed by writing to temp files (`/tmp/churn-response.json`, `/tmp/sentiment-response.json`) then `cat`-ing the result.
+2. **Base64 body encoding:** AWS CLI v2 treats `--body` as base64-encoded by default. Passing raw CSV like `--body "2,100,78.0,..."` caused garbled input. Fixed by writing payload to a temp file and using `fileb://` prefix (`--body fileb:///tmp/churn-payload.csv`).
+
+**My evaluation:** Both are AWS CLI v2 behavioral differences that don't surface locally (v1 handles both differently). The `fileb://` fix is documented in AWS docs but easy to miss.
+
+---
+
+### 19. Clean Slate Redeploy — Stale Model Tar
+
+**What I asked:** Churn endpoint was InService but returning 500 on every invoke. CloudWatch showed `No module named 'inference'`.
+
+**LLM analysis:** The endpoint was InService with an **old** model tar (pre-`setup.py` fix). Previous failed `update_endpoint` calls caused SageMaker to roll back to the last working config — which pointed to the old S3 model tar without `setup.py`. The endpoint appeared healthy (passed `/ping`) but couldn't serve predictions.
+
+**LLM fix:** Deleted the endpoint, endpoint config, and model to force a completely fresh deploy:
+
+```bash
+aws sagemaker delete-endpoint --endpoint-name churn-predictor-endpoint
+aws sagemaker delete-endpoint-config --endpoint-config-name churn-predictor-config
+aws sagemaker delete-model --model-name churn-predictor-model
+```
+
+**My evaluation:** Right call. SageMaker's rollback behavior is designed for safety but creates a trap: the endpoint looks healthy while serving a stale model. The only way to guarantee the new tar is loaded is a full teardown + recreate.
+
+---
+
+### 20. SAGEMAKER_PROGRAM vs Algorithm Mode — CSV Support in inference.py
+
+**What I asked:** After redeploying, the churn endpoint still failed with a 500 on CSV payloads.
+
+**LLM first attempt:** Removed `SAGEMAKER_PROGRAM` and `SAGEMAKER_SUBMIT_DIRECTORY` from the model environment so the built-in XGBoost container would handle CSV natively.
+
+**Result:** Container crashed on startup — without `SAGEMAKER_PROGRAM`, the XGBoost container runs in "algorithm mode" and tries to load _every_ file in the tar as a model. It choked on `feature_columns.json`:
+
+```
+RuntimeError: Model /opt/ml/model/feature_columns.json cannot be loaded
+```
+
+**Corrected fix (two changes):**
+
+1. **Restored `SAGEMAKER_PROGRAM=inference.py`** in `deploy.py` — the container needs the custom script because the tar contains non-model files
+2. **Added `text/csv` support to `inference.py`** — `input_fn` now parses CSV as a list of floats, and `predict_fn` handles both list (CSV, pre-encoded) and dict (JSON, needs label encoding) inputs
+
+**My evaluation:** The first attempt (removing SAGEMAKER*PROGRAM) was a reasonable hypothesis — the app does send CSV — but missed that our tar layout forces "framework mode" with a custom script. The corrected two-part fix addresses the real constraint: we need SAGEMAKER_PROGRAM \_and* CSV support in `inference.py`. This also validates the Task 7 finding — `inference.py` was always needed, just needed to support the content type the app actually sends.
+
+---
+
+### 21. deploy.yml — qa-evaluator-api Docker Build Failure
+
+**What I asked:** `deploy.yml` failed on `docker/build-push-action@v5` for `qa-evaluator-api` — `COPY requirements.txt .` failed because the file doesn't exist.
+
+**LLM analysis:** The `services/qa-evaluator-api/` directory only contained a `Dockerfile` (written by George). No `requirements.txt`, no `app.py` — the service was never implemented. The Dockerfile references both files but neither existed, so the matrix Docker build failed.
+
+**LLM fix:** Created two stub files:
+
+- `requirements.txt` — fastapi, uvicorn, httpx (matching the Dockerfile's uvicorn CMD and httpx health check)
+- `app.py` — minimal FastAPI app with a `/health` endpoint, marked as stub for George/Okino to implement
+
+**My evaluation:** Right approach — stub it out so the CI pipeline isn't blocked by an unfinished teammate service. The stubs match the Dockerfile's expectations (uvicorn entrypoint, httpx health check) so the image builds and runs correctly. George can replace with the real implementation later.
+
+---
+
+### 22. agent-service boto3 Dependency Conflict
+
+**What I asked:** `deploy.yml` Docker build for `agent-service` failed with `ResolutionImpossible` — pip can't resolve dependencies.
+
+**LLM analysis:** `requirements.txt` pinned `boto3==1.35.0`, but `langchain-aws==0.2.0` requires `boto3<1.35.0,>=1.34.131`. The exact pin conflicted with the upper bound.
+
+**LLM fix:** Changed `boto3==1.35.0` to `boto3>=1.34.131,<1.35.0` to satisfy both constraints.
+
+**My evaluation:** Straightforward version conflict. The original pin was probably set before `langchain-aws` was added. This is a common pattern when teams add packages without checking transitive dependency constraints.
+
+---
+
+### 23. EKS Cluster Access Setup for deploy.yml
+
+**What I asked:** `deploy.yml` failed on `kubectl apply` with `connection refused` — the GitHub runner had no kubeconfig.
+
+**LLM analysis:** The workflow expects a `KUBE_CONFIG` secret (base64-encoded kubeconfig) but it wasn't set. The runner had no way to reach the EKS cluster.
+
+**LLM actions:**
+
+1. Listed EKS clusters — found `eks-ezvrmopo-okl` (v1.30) and `k8s-training-cluster` (v1.33)
+2. I selected `eks-ezvrmopo-okl` as the target cluster
+3. Found that IAM user `Troy` wasn't in the cluster's access entries (only `Okino` had access)
+4. Added `Troy` as an access entry with `AmazonEKSClusterAdminPolicy`
+5. Generated kubeconfig via `aws eks update-kubeconfig`
+6. Base64-encoded and set as `KUBE_CONFIG` GitHub secret
+
+**My evaluation:** Correct sequence. The LLM asked me which cluster to target rather than guessing. The access entry addition was necessary — without it, even a valid kubeconfig would fail auth.
+
+---
+
+### 24. Kubeconfig AWS_PROFILE Reference — CI Environment Mismatch
+
+**What I asked:** `deploy.yml` still failed on `kubectl apply` with `The config profile (lumineer) could not be found`.
+
+**LLM analysis:** The kubeconfig generated by `aws eks update-kubeconfig` included `AWS_PROFILE: lumineer` in the exec env block — a local-only AWS CLI profile that doesn't exist on the GitHub runner. The runner uses env var credentials (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`), not named profiles.
+
+**LLM fix:** Generated a fresh kubeconfig to `/tmp/ci-kubeconfig`, stripped the `AWS_PROFILE` env blocks with `sed`, verified no `lumineer` references remained, then re-uploaded as the `KUBE_CONFIG` secret.
+
+**My evaluation:** Another local-vs-CI environment gap. The `aws eks update-kubeconfig` command inherits whatever profile is active locally and bakes it into the kubeconfig. For CI, the profile reference must be removed so the runner falls back to environment variable credentials.
+
+---
+
 ## Instances Where I Provided Guidance or Changed LLM Recommendations
 
 ### 1. Workflow Trigger Strategy
@@ -234,6 +440,14 @@ Included docker-compose additions for OTel Collector, Tempo, Prometheus, and Gra
 
 ---
 
+### 6. Iterative Secret Debugging
+
+**Situation:** The `sagemaker-deploy.yml` workflow failed twice in a row due to missing secrets (`S3_BUCKET`, then `SAGEMAKER_ROLE_ARN`).
+**My process:** Ran the workflow, read the error, set the secret, re-ran. Each failure revealed the next missing secret. The LLM correctly diagnosed each one from the traceback but couldn't preemptively check which secrets are set (no access to GitHub Secrets API).
+**Takeaway:** Before first workflow run, audit the workflow YAML for all `${{ secrets.* }}` references and ensure every one is set. Would have saved two failed runs.
+
+---
+
 ## LLM Tools Used
 
 | Tool                             | Usage                               |
@@ -249,3 +463,8 @@ Included docker-compose additions for OTel Collector, Tempo, Prometheus, and Gra
 2. **Codebase analysis is a strength** — the LLM accurately traced data flow across multiple files (inference.py → deploy.py → app.py) and identified the dead code + duplication issues.
 3. **Teaching with real code** — the LangSmith/OTel comparison was more useful because it referenced our actual `retention_graph.py` and tool files rather than generic examples.
 4. **First-run failures are normal** — the `AWS_REGION` secret issue was a simple miss that the LLM couldn't have known about (it doesn't have access to GitHub Secrets state). Quick fix once identified.
+5. **CloudWatch logs are essential for SageMaker debugging** — CI runner output only shows waiter timeouts. The actual container failure reason (`No module named 'inference'`) was only in CloudWatch. The LLM pulled the right log stream and identified the root cause (missing `setup.py` in tar) in one step.
+6. **Iterative workflow debugging** — 6 consecutive workflow runs to get `sagemaker-deploy.yml` passing: missing S3_BUCKET → missing SAGEMAKER_ROLE_ARN → update loop → waiter timeout → missing setup.py → missing packaging module. Each failure taught something new about the gap between local assumptions and CI reality.
+7. **Execution order matters in CI scripts** — the skip logic placement bug (Task 17) showed that checking endpoint health _after_ uploading a new model tar defeats the purpose of the check. The order must be: check → skip OR package → upload → deploy.
+8. **SageMaker rollback creates stale-model traps** — when `update_endpoint` fails, SageMaker rolls back to the previous config. The endpoint returns to InService but serves the old model. A full delete → recreate is the only reliable way to force a new model tar.
+9. **LLM missteps are recoverable** — the SAGEMAKER_PROGRAM removal (Task 20) was wrong, but the error was diagnosable from CloudWatch logs in one iteration. The corrected fix (restore SAGEMAKER_PROGRAM + add CSV to inference.py) addressed the real constraint.
