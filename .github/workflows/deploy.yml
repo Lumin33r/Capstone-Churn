@@ -16,7 +16,7 @@ on:
           - all
           - agent-service
           - churn-predictor
-          - qa-evaluator
+          - sentiment-predictor
           - frontend
         default: all
       tag:
@@ -44,8 +44,8 @@ jobs:
             context: services/agent-service
           - name: churn-predictor
             context: services/churn-predictor-api
-          - name: qa-evaluator
-            context: services/qa-evaluator-api
+          - name: sentiment-predictor
+            context: services/sentiment-predictor-api
           - name: frontend
             context: frontend
     steps:

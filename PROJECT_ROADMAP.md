@@ -360,7 +360,6 @@ Presentation Day                   ███████████████
 
 ### Okino — QA/Transcript Evaluator
 
-
 - [x] Training notebook (`services/sentiment-analysis-api/sentiment_training.ipynb`)
 - [x] FastAPI wrapper with Bedrock-powered sentiment analysis
 - [x] Dockerfile, K8s deployment + service manifests
