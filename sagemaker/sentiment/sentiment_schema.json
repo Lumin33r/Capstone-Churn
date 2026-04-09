@@ -119,7 +119,7 @@
   "frustration_level": {
     "type": "numeric",
     "encoding": "normalize",
-    "notes": "Discrete frustration level (0\u20133)."
+    "notes": "Discrete frustration level (0-3)."
   },
   "escalation_probability": {
     "type": "numeric",
@@ -150,5 +150,15 @@
     "type": "boolean",
     "encoding": "binary",
     "notes": "Whether the customer recently experienced an outage."
+  },
+  "qa_score": {
+    "type": "numeric",
+    "encoding": "normalize",
+    "notes": "Provides an overall rating of the interaction between the customer and agent."
+  },
+  "sentiment_shift": {
+    "type": "numeric",
+    "encoding": "normalize",
+    "notes": "Measure of the gradient shift of sentiment throughout the conversation."
   }
 }

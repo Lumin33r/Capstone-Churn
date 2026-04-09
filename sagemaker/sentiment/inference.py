@@ -18,13 +18,15 @@ sentiment_schema = None
 
 # MODEL LOADING
 def model_fn(model_dir: str) -> Any:
-    global tokenizer, model
+    global tokenizer, model, sentiment_schema
+    logger.info(msg=f"[DEBUG] model_dir = {model_dir}")
+    logger.info(msg=f"[DEBUG] Files in model_dir: {os.listdir(path=model_dir)}")
     try:
         logger.info(msg=f"[model_fn] Loading tokenizer from: {model_dir}")
-        tokenizer = AutoTokenizer.from_pretrained(model_dir)
+        tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path=model_dir)
 
         logger.info(msg=f"[model_fn] Loading model from: {model_dir}")
-        model = AutoModelForSequenceClassification.from_pretrained(model_dir)
+        model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path=model_dir)
         model.to(DEVICE)
         model.eval()
         
@@ -49,7 +51,7 @@ def input_fn(request_body: str, content_type: str) -> Dict[str, Any]:
         logger.info(msg=f"[input_fn] Received content_type={content_type}")
 
         if content_type == "application/json":
-            data = json.loads(request_body)
+            data = json.loads(s=request_body)
 
             # Single record
             if isinstance(data, dict):
@@ -142,9 +144,9 @@ def output_fn(prediction: Dict[str, Any], accept: str) -> Tuple[str, Literal["ap
                 "confidence": float(c),
             }
 
-
             # Attach full schema
-            result["schema"] = sentiment_schema
+            if sentiment_schema is not None:
+                result.update(sentiment_schema) 
             results.append(result)
             
         logger.info(msg="[output_fn] Serializing output.")
