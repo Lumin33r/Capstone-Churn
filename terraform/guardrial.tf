@@ -43,7 +43,7 @@ resource "aws_bedrock_guardrail" "sentiment_analysis" {
     filters_config {
       type            = "PROMPT_ATTACK"
       input_strength  = "HIGH"
-      output_strength = "HIGH"    
+      output_strength = "NONE" 
     }
   }
 

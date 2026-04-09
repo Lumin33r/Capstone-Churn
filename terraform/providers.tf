@@ -2,11 +2,11 @@
 # Tells Terraform which cloud provider to use and what version
 
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.2"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.40.0"
     }
   }
 }
