@@ -27,7 +27,7 @@
 │  │  │                                                        │     │    │
 │  │  │  Tools:                                                │     │    │
 │  │  │   • invoke_churn_model  ──▶ Churn Prediction Endpoint  │     │    │
-│  │  │   • invoke_transcript   ──▶ Transcript Analysis Endpt  │     │    │
+│  │  │   • invoke_transcript   ──▶ Sentiment Analysis Endpt  │     │    │
 │  │  │   • bedrock_chat        ──▶ Bedrock (Claude)           │     │    │
 │  │  └────────────────────────────────────────────────────────┘     │    │
 │  │                                                                  │    │
@@ -38,7 +38,7 @@
 │  └──────────────────────────────────────────────────────────────────┘    │
 │                                                                           │
 │  ┌─────────────────────┐  ┌─────────────────────┐                       │
-│  │ Churn Prediction    │  │ Transcript Analysis  │                       │
+│  │ Churn Prediction    │  │ Sentiment Analysis  │                       │
 │  │ FastAPI Wrapper     │  │ FastAPI Wrapper      │                       │
 │  │  /predict  /health  │  │  /predict  /health   │                       │
 │  └────────┬────────────┘  └────────┬─────────────┘                       │
@@ -49,7 +49,7 @@
    ┌────────▼────────┐    ┌─────────▼────────┐    ┌──────────────────┐
    │ SageMaker       │    │ SageMaker        │    │ Amazon Bedrock   │
    │ Endpoint #1     │    │ Endpoint #2      │    │ Claude 3         │
-   │ Customer Churn  │    │ Transcript       │    │ (Foundation LLM) │
+   │ Customer Churn  │    │ Sentiment        │    │ (Foundation LLM) │
    │ (XGBoost)       │    │ Classification   │    └──────────────────┘
    └─────────────────┘    └──────────────────┘
 
@@ -71,6 +71,10 @@ capstone/
 │       ├── ci-post-merge.yml         # Auto post-merge: tests → Docker → endpoints → E2E
 │       └── slack-pr-events.yml       # Slack notifications on PR open/merge
 ├── terraform/
+|   ├── iam.tf
+|   ├── s3.tf
+|   ├── sagemaker.tf
+|   ├── guardrail.tf
 │   ├── main.tf
 │   ├── variables.tf
 │   ├── outputs.tf
@@ -85,12 +89,14 @@ capstone/
 |      ├── backend-deployment.yaml
 |      ├── churn-wrapper-deployment.yaml
 |      ├── frontend-deployment.yaml
-|      ├── transcript-wrapper-deployment.yaml
+|      ├── sentiment-wrapper-deployment.yaml
 │   ├── secrets.yaml             # (template — real values via GH Secrets)
 |   services/
 │      ├── backend-service.yaml
 │      ├── churn-wrapper-service.yaml
-│      ├── transcript-wrapper-service.yaml
+│      ├── sentiment-wrapper-service.yaml
+|      ├── churn-predictor-service.yaml
+|      ├── sentiment-predictor-service.yaml
 │      └── frontend-service.yaml
 ├── backend/
 │   ├── Dockerfile
@@ -99,26 +105,26 @@ capstone/
 │   │   ├── agent.py                # LangChain agent + tool definitions
 │   │   ├── tools/
 │   │   │   ├── churn_tool.py       # Calls churn-wrapper /predict
-│   │   │   ├── transcript_tool.py  # Calls transcript-wrapper /predict
+│   │   │   ├── sentiment_tool.py  # Calls transcript-wrapper /predict
 │   │   │   └── bedrock_tool.py     # Bedrock invoke for general chat
 │   │   └── config.py               # Env var config
 │   └── requirements.txt
 ├── ml-wrappers/
-│   ├── churn/
+│   ├── churn-predictor-api/
 │   │   ├── Dockerfile
 │   │   ├── app.py                  # FastAPI /predict + /health
 │   │   └── requirements.txt
-│   └── transcript/
+│   └── sentiment-analysis-api/
 │       ├── Dockerfile
 │       ├── app.py                  # FastAPI /predict + /health
 │       └── requirements.txt
 ├── sagemaker/
 │   ├── churn/
-│   │   ├── train.py                # Training script or notebook
+│   │   ├── churn_training.ipynb                # Training script or notebook
 │   │   ├── deploy.py               # Endpoint creation script
 │   │   └── data/                   # Sample data / data prep scripts
-│   └── transcript/
-│       ├── train.py
+│   └── sentiment/
+│       ├── sentiment_training.ipynb
 │       ├── deploy.py
 │       └── data/
 ├── frontend/
@@ -353,6 +359,7 @@ Presentation Day                   ███████████████
 - [x] Automatic post-merge validation with unit tests, Docker builds, endpoint health, E2E
 
 ### Okino — QA/Transcript Evaluator
+
 
 - [x] Training notebook (`services/sentiment-analysis-api/sentiment_training.ipynb`)
 - [x] FastAPI wrapper with Bedrock-powered sentiment analysis

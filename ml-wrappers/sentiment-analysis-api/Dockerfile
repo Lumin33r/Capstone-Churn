@@ -1,6 +1,5 @@
-# services/qa-evaluator-api/Dockerfile
-# Written by George — Okino writes the app.py this wraps
-# Multi-stage build with slim base image
+# services/churn-predictor-api/Dockerfile
+# Written by George — Kathleen writes the app.py this wraps
 FROM python:3.11-slim AS builder
 WORKDIR /build
 COPY requirements.txt .
@@ -13,7 +12,7 @@ COPY . .
 ENV PATH=/root/.local/bin:$PATH
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-  CMD python -c "import httpx; httpx.get('http://localhost:8000/health')" || exit 1
+  CMD python -c "import httpx; httpx.get('http://localhost:8001/health')" || exit 1
 
-EXPOSE 8000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8001
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]

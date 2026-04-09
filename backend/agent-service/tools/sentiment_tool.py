@@ -1,0 +1,37 @@
+# services/agent-service/tools/qa_tool.py
+# LangChain Tool that calls Okino's Sentiment SageMaker endpoint
+
+import httpx
+import os
+from langchain.tools import tool
+
+SENTIMENT_URL = os.getenv(key="SENTIMENT_URL", default="http://localhost:8000")
+
+
+@tool
+def analyze_call(transcript: str) -> str:
+    """
+    Analyzes a customer support call transcript for quality and sentiment.
+    Use this tool when given a call transcript to evaluate.
+    Returns a QA score from 0 to 10 and a sentiment classification.
+
+    Args:
+        transcript: The full text of the customer support call
+
+    Returns:
+        JSON string with qa_score and sentiment fields
+    """
+    try:
+        response = httpx.post(
+            url=f"{SENTIMENT_URL}/predict",
+            json={"text": transcript},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        return str(object=response.json())
+    except httpx.TimeoutException:
+        return '{"error": "QA service timeout", "qa_score": 5, "sentiment": "unknown"}'
+    except httpx.HTTPStatusError as e:
+        return f'{{"error": "QA service returned {e.response.status_code}", "qa_score": 5, "sentiment": "unknown"}}'
+    except Exception as e:
+        return f'{{"error": "{str(object=e)}", "qa_score": 5, "sentiment": "unknown"}}'

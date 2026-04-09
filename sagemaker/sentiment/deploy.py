@@ -52,15 +52,17 @@ INSTANCE_TYPE = "ml.t2.medium"
 # Model artifact paths (relative to this script)
 SCRIPT_DIR: str = os.path.dirname(p=os.path.abspath(path=__file__))
 MODEL_PATHS: list[str] = [
-    os.path.join(f"{SCRIPT_DIR}/model", "inference.py"),
-    os.path.join(SCRIPT_DIR, "model/*"),
-    os.path.join(f"{SCRIPT_DIR}/model", "requirements.txt"),
-    # os.path.join(SCRIPT_DIR, "feature_columns.json"),
-    # os.path.join(SCRIPT_DIR, "label_encoders.json"),
-    # os.path.join(SCRIPT_DIR, "label_encoding_schema.json"),
-    # os.path.join(SCRIPT_DIR, "sentiment_columns.json"),
-    # os.path.join(SCRIPT_DIR, "sentiment_encoders.json"),
-    os.path.join(f"{SCRIPT_DIR}/model", "sentiment_schema.json")
+    os.path.join(SCRIPT_DIR, "inference.py"),
+    os.path.join(SCRIPT_DIR, "pytorch_model.bin"),
+    os.path.join(SCRIPT_DIR, "tokenizer.json"),
+    os.path.join(SCRIPT_DIR, "requirements.txt"),
+    os.path.join(SCRIPT_DIR, "special_tokens_map.json"),
+    os.path.join(SCRIPT_DIR, "tokenizer_config.json"),
+    os.path.join(SCRIPT_DIR, "config.json"),
+    os.path.join(SCRIPT_DIR, "vocab.txt"),
+    os.path.join(SCRIPT_DIR, "sentiment_columns.json"),
+    os.path.join(SCRIPT_DIR, "sentiment_encoders.json"),
+    os.path.join(SCRIPT_DIR, "sentiment_schema.json")
 ]
 
 def shutdown_threads() -> None:
@@ -129,7 +131,7 @@ def validate_model_artifacts() -> None:
     ]
 
     for fname in required_files:
-        path = os.path.join(f"{SCRIPT_DIR}/exported_model", fname)
+        path = os.path.join(f"{SCRIPT_DIR}/model", fname)
         if not os.path.isfile(path=path):
             # raise FileNotFoundError(f"Required file missing: {path}")
             pass
@@ -436,7 +438,7 @@ def test_endpoint() -> None:
         "agent_id": "agent_007",
         "agent_name": "James Bond",
         "primary_scenario": "billing_inquiry",
-        "call_transcript": "I feel good about my service",
+        "call_transcript": "I do not feel good about my service",
         "overall_rating": 0,
         "call_successful":  False,
         "customer_monthly_spend": 0.0,
@@ -475,5 +477,6 @@ if __name__ == "__main__":
         tar_path = os.path.join(SCRIPT_DIR, "model.tar.gz")
         package_model(tar_path=tar_path)
         s3_uri = upload_to_s3(tar_path=tar_path)
-        create_endpoint(s3_uri=s3_uri) 
+        create_endpoint(s3_uri=s3_uri)
+        os.remove(path="./model.tar.gz")
     atexit.register(shutdown_threads)

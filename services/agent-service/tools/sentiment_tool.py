@@ -1,6 +1,5 @@
-# services/agent-service/tools/qa_tool.py
-# LangChain Tool that calls Okino's QA Evaluator SageMaker endpoint
-# George (gvill0576) — Capstone-Churn
+# services/agent-service/tools/sentiment_tool.py
+# LangChain Tool that calls Okino's Sentiment SageMaker endpoint
 
 import httpx
 import os
@@ -14,7 +13,7 @@ def analyze_call(transcript: str) -> str:
     """
     Analyzes a customer support call transcript for quality and sentiment.
     Use this tool when given a call transcript to evaluate.
-    Returns a QA score from 0 to 10 and a sentiment classification.
+    Returns a sentiment classification along with other fields.
 
     Args:
         transcript: The full text of the customer support call
