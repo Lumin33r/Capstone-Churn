@@ -29,7 +29,7 @@ spec:
         - name: agent-service
           image: ghcr.io/lumin33r/agent-service:latest
           ports:
-            - containerPort: 8000
+            - containerPort: 8080
           envFrom:
             - configMapRef:
                 name: agent-config
@@ -38,14 +38,14 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: 8000
+              port: 8080
             initialDelaySeconds: 10
             periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
-              port: 8000
+              port: 8080
             initialDelaySeconds: 20
             periodSeconds: 10
             failureThreshold: 3
