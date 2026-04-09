@@ -181,8 +181,97 @@ Used Claude Code as a pair programming partner throughout the capstone project. 
 - Reusing old PRs → New branch + PR every time
 - Co-author attribution → Removed
 
+---
+
+## Session 2 Work (April 7, 2026)
+
+### LangSmith Integration
+- Set up free tier account at smith.langchain.com
+- Created `retention-engine` project for trace collection
+- Configured via `.env` file (LANGCHAIN_TRACING_V2, LANGCHAIN_API_KEY, LANGCHAIN_PROJECT)
+- API key stored in GitHub Secrets (`gh secret set LANGCHAIN_API_KEY`)
+- Verified traces visible in LangSmith dashboard showing tool calls, latency, token usage
+- **My guidance:** Asked about embedding in our UI vs separate dashboard. Claude recommended separate dashboard — sufficient for rubric.
+
+### LangGraph Implementation
+- Replaced AgentExecutor with explicit LangGraph state graph
+- Nodes: classify → model → tools → respond
+- Conditional edges based on whether tools are needed
+- Added MemorySaver checkpointer for conversation memory across messages
+- **Issue:** Initial implementation lost conversation context between messages — LLM forgot which customer was being discussed
+- **Fix:** Added `MemorySaver` checkpointer with `thread_id` for session-based persistence
+- **Issue:** System prompt was too short — agent freely chose actions instead of being constrained to approved list
+- **My guidance:** Noticed in LangSmith traces that the agent wasn't selecting from the approved retention actions. Asked Claude to update the system prompt with explicit action selection rules.
+
+### Batch Prediction Optimization
+- `/high-risk` endpoint was calling SageMaker individually for 20,571 customers (~34 min)
+- Implemented batch CSV prediction: 500 rows per SageMaker call
+- Added in-memory cache: first call ~30 seconds, subsequent calls <100ms
+- **My guidance:** Identified the performance problem during demo testing ("this is taking forever"). Asked Claude to evaluate optimization approaches.
+
+### Frontend Tab Memory Fix
+- **Bug I found:** Switching between Analyze and Chat tabs wiped the state in both
+- **Fix:** Changed from conditional rendering (`{tab === "analyze" ? <A/> : <B/>}`) to CSS hidden (`<div className={tab === "analyze" ? "" : "hidden"}>`) so both tabs stay mounted
+
+### Okino's PR #46 Review
+- Identified that his PR deletes our entire `services/churn-predictor-api/` directory
+- He also renames `qa_tool.py` → `sentiment_tool.py` and restructures `services/` → `backend/`
+- **My guidance:** Requested changes on the PR — told him not to delete our code, offered to coordinate the rename
+- Created `.backup/` directory to protect critical files from branch conflicts
+- Tested his live SageMaker sentiment endpoint — it returns raw class predictions, not the rich JSON output we need
+
+### Rubric Audit
+- Conducted full audit of all 10 rubric areas against current implementation
+- Identified CI/CD (0%) and Documentation (20%) as highest risk areas
+- **My guidance:** Recommended Troy proceed with CI/CD immediately despite ongoing code changes — workflows are in an isolated directory
+
+---
+
+## Instances Where I Provided Guidance — Session 2
+
+### 13. Tab Memory Persistence
+**Bug I found:** Switching between Analyze and Chat tabs reset all state.
+**Outcome:** Changed rendering approach to keep both tabs mounted.
+
+### 14. LangSmith vs Embedded Observability
+**My question:** "Should we put it in our interface as another tab?"
+**Outcome:** Separate dashboard is sufficient — no need to embed.
+
+### 15. LangGraph Action Selection
+**My observation:** Noticed in LangSmith traces that the agent wasn't choosing from the approved action list.
+**Outcome:** Updated system prompt with explicit action codes and selection rules.
+
+### 16. High-Risk Performance
+**My observation:** "The show me high risk customers question is taking forever."
+**Outcome:** Batch prediction + caching implemented.
+
+### 17. Protecting Code from PR Deletions
+**My guidance:** After discovering Okino's PR deletes our code, created `.backup/` and established the rule: always verify files exist on current branch before starting work.
+
+### 18. Not Making Assumptions About Teammate's Code
+**My guidance:** When Claude offered to rewrite Okino's qa_tool.py to call his SageMaker endpoint directly, I said "No, I don't want to make those assumptions. We will work it through this evening."
+
+### 19. Frankenstein PR — Cherry-Picking Across Branches
+**Situation:** Okino's PR #46 had useful new sentiment files but also deleted our working code and restructured directories. PR #47 had our LangGraph/LangSmith work. Neither could merge cleanly.
+**My guidance:** Asked Claude to cherry-pick Okino's sentiment files from his branch, combine with our code from backups, and create a single consolidated PR #48. Closed both #46 and #47.
+**Outcome:** Clean PR with all components working together. Required manual verification that every file from both PRs was included.
+
+### 20. Defending Working Code
+**Situation:** Troy and Okino suggested uploading label encoders to S3 and restructuring the endpoint invocation pattern.
+**My guidance:** "The label encoders are already hardcoded in app.py and the endpoint is live and tested. Don't restructure something that's working."
+**Outcome:** Kept the working implementation. Avoided unnecessary complexity before presentation.
+
+### 21. Model Drift as Stretch Goal
+**My question:** "Is there SageMaker model drift tracking we can implement?"
+**Claude's options:** Full SageMaker Model Monitor (4+ hours) vs lightweight `/drift` endpoint (30 min).
+**My decision:** Added to roadmap as stretch goal rather than implementing now — presentation prep is higher priority.
+
+---
+
 ### What I Would Do Differently
 - Start with the XGBoost container from the beginning instead of sklearn (would have saved 6 deploy attempts)
 - Upload Agent 1 synthetic data to S3 immediately instead of relying on local file paths
 - Set up docker-compose for local development earlier in the project
 - Establish stricter PR review process — too many files were modified outside lane ownership
+- Use LangGraph from the start instead of AgentExecutor — the explicit state graph is easier to reason about and debug
+- Set up LangSmith from Day 1 — would have caught the action selection issue much earlier

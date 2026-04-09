@@ -1,0 +1,67 @@
+{
+  "call_id": {
+    "type": "categorical",
+    "encoding": "label_encode",
+    "notes": "Unique call identifier; high-cardinality; typically excluded from modeling."
+  },
+  "customer_id": {
+    "type": "categorical",
+    "encoding": "label_encode",
+    "notes": "Unique customer identifier; high-cardinality; often excluded to avoid leakage."
+  },
+  "call_date": {
+    "type": "categorical",
+    "encoding": "label_encode",
+    "notes": "Raw date string; useful only if engineered into day/month/week features."
+  },
+  "call_time": {
+    "type": "categorical",
+    "encoding": "label_encode",
+    "notes": "Raw time string; useful only if converted into hour-of-day or time bucket."
+  },
+  "agent_id": {
+    "type": "categorical",
+    "encoding": "label_encode",
+    "notes": "Identifier for the agent; categorical feature; moderate cardinality."
+  },
+  "agent_name": {
+    "type": "categorical",
+    "encoding": "label_encode",
+    "notes": "Human-readable agent name; redundant with agent_id; usually dropped."
+  },
+  "primary_scenario": {
+    "type": "categorical",
+    "encoding": "one_hot",
+    "notes": "High-level scenario category (billing, outage, cancellation, etc.). Strong categorical signal."
+  },
+  "call_transcript": {
+    "type": "text",
+    "encoding": "passthrough",
+    "notes": "Raw transcript text; not used directly in tabular models; used to generate NLP features."
+  },
+  "overall_rating": {
+    "type": "numeric",
+    "encoding": "normalize",
+    "notes": "Customer satisfaction rating (0-5). Numeric predictor."
+  },
+  "call_successful": {
+    "type": "boolean",
+    "encoding": "binary",
+    "notes": "Binary success flag; may cause target leakage depending on prediction task."
+  },
+  "customer_monthly_spend": {
+    "type": "numeric",
+    "encoding": "normalize",
+    "notes": "Customer's monthly spend; numeric predictor."
+  },
+  "customer_service_count": {
+    "type": "numeric",
+    "encoding": "normalize",
+    "notes": "Number of customer service interactions in the last 12 months."
+  },
+  "customer_issue_history": {
+    "type": "numeric",
+    "encoding": "normalize",
+    "notes": "Count of past issues or complaints; numeric predictor."
+  }
+}

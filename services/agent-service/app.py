@@ -54,6 +54,7 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     customer_id: str | None = None
+    session_id: str = "default"
 
 
 class ChatResponse(BaseModel):
@@ -73,17 +74,14 @@ async def health() -> dict[str, str]:
 
 @app.post(path="/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest) -> ChatResponse:
-    from chains.retention_agent import get_agent
+    from chains.retention_graph import invoke_graph
     try:
-        agent = get_agent()
-
-        # Include customer_id in the agent input if provided
+        # Include customer_id in the message if provided
         agent_input = body.message
         if body.customer_id:
             agent_input = f"Customer ID: {body.customer_id}\n\n{body.message}"
 
-        result = agent.invoke({"input": agent_input})
-        output = result.get("output", "")
+        output = invoke_graph(agent_input, customer_id=body.customer_id, session_id=body.session_id)
 
         # Parse structured output
         qa_match       = re.search(r"QA Score:\s*([\d.]+)", output)
