@@ -1,6 +1,5 @@
 # services/agent-service/tools/sentiment_tool.py
-# LangChain Tool that calls Okino's QA Evaluator SageMaker endpoint
-
+# LangChain Tool that calls Okino's Sentiment SageMaker endpoint
 
 import httpx
 import os

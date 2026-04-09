@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-import os, re
+import re
 
 load_dotenv()
 
@@ -26,7 +26,7 @@ APPROVED_ACTIONS = {
 def validate_action(output: str, risk_level: str | None) -> str:
     """Check that the agent's recommended action is in the approved list.
     If not, append a warning and default to the safest action for that risk level."""
-    action_match = re.search(r"Action:\s*(\S+)", output)
+    action_match = re.search(pattern=r"Action:\s*(\S+)", string=output)
     if not action_match or not risk_level:
         return output
 
@@ -89,15 +89,15 @@ async def chat(body: ChatRequest) -> ChatResponse:
         output = result.get("output", "")
 
         # Parse structured output
-        sentiment_match = re.search(r"Sentiment:\s*(Positive|Neutral|Negative)", output)
-        churn_match    = re.search(r"([\d.]+)%", output)
-        risk_match     = re.search(r"Churn Risk:\s*(LOW|MEDIUM|HIGH)", output)
-        rec_match      = re.search(r"Recommendation:\s*(.+?)(?:\n|$)", output)
-        cid_match      = re.search(r"Customer ID:\s*(C\d+)", output)
+        sentiment_match = re.search(pattern=r"Sentiment:\s*(Positive|Neutral|Negative)", string=output)
+        churn_match    = re.search(pattern=r"([\d.]+)%", string=output)
+        risk_match     = re.search(pattern=r"Churn Risk:\s*(LOW|MEDIUM|HIGH)", string=output)
+        rec_match      = re.search(pattern=r"Recommendation:\s*(.+?)(?:\n|$)", string=output)
+        cid_match      = re.search(pattern=r"Customer ID:\s*(C\d+)", string=output)
 
         # Guardrail: validate the recommended action
         risk_level = risk_match.group(1) if risk_match else None
-        output = validate_action(output, risk_level)
+        output = validate_action(output=output, risk_level=risk_level)
 
         return ChatResponse(
             response=output,
@@ -108,4 +108,4 @@ async def chat(body: ChatRequest) -> ChatResponse:
             retention_recommendation=rec_match.group(1).strip() if rec_match else None,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(object=e))
