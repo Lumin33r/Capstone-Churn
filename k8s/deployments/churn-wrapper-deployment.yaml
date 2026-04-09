@@ -31,8 +31,6 @@ spec:
               path: /health
               port: 8000
             initialDelaySeconds: 10
-            timeoutSeconds: 1
-            successThreshold: 1
             periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
@@ -40,8 +38,6 @@ spec:
               path: /health
               port: 8000
             initialDelaySeconds: 20
-            timeoutSeconds: 1
-            successThreshold: 1
             periodSeconds: 10
             failureThreshold: 3
           resources:

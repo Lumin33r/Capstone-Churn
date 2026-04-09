@@ -1,16 +1,18 @@
+# k8s/deployments/sentiment-predictor-deployment.yaml
+# Runs Okino's QA Evaluator SageMaker wrapper service
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: transcript-wrapper-deployment
+  name: sentiment-predictor
   namespace: retention-engine
   labels:
-    app: transcript-wrapper-deployment
+    app: sentiment-predictor
     team: retention-engine
 spec:
   replicas: 1
   selector:
-    matchLabels: 
-      app: transcript-wrapper-deployment
+    matchLabels:
+      app: sentiment-predictor
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -19,29 +21,28 @@ spec:
   template:
     metadata:
       labels:
-        app: transcript-wrapper-deployment
+        app: sentiment-predictor
     spec:
       containers:
-        - name: transcript-wrapper-deployment
-          image: ghcr.io/lumin33r/transcript-wrapper-deployment:latest
+        - name: sentiment-predictor
+          image: ghcr.io/lumin33r/sentiment-predictor:latest
           ports:
-            - containerPort: 8000
+            - containerPort: 8001
+          envFrom:
+            - secretRef:
+                name: aws-secrets
           readinessProbe:
             httpGet:
               path: /health
-              port: 8000
-            initialDelaySeconds: 10
-            timeoutSeconds: 1
-            successThreshold: 1
+              port: 8001
+            initialDelaySeconds: 15
             periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
-              port: 8000
-            initialDelaySeconds: 20
-            timeoutSeconds: 1
-            successThreshold: 1
+              port: 8001
+            initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 3
           resources:

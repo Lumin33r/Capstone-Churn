@@ -1,18 +1,16 @@
-# k8s/deployments/qa-evaluator-deployment.yaml
-# Runs Okino's QA Evaluator SageMaker wrapper service
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: qa-evaluator
+  name: sentiment-wrapper-deployment
   namespace: retention-engine
   labels:
-    app: qa-evaluator
+    app: sentiment-wrapper-deployment
     team: retention-engine
 spec:
   replicas: 1
   selector:
-    matchLabels:
-      app: qa-evaluator
+    matchLabels: 
+      app: sentiment-wrapper-deployment
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -21,28 +19,25 @@ spec:
   template:
     metadata:
       labels:
-        app: qa-evaluator
+        app: sentiment-wrapper-deployment
     spec:
       containers:
-        - name: qa-evaluator
-          image: ghcr.io/lumin33r/qa-evaluator:latest
+        - name: sentiment-wrapper-deployment
+          image: ghcr.io/lumin33r/sentiment-wrapper-deployment:latest
           ports:
             - containerPort: 8000
-          envFrom:
-            - secretRef:
-                name: aws-secrets
           readinessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 15
+            initialDelaySeconds: 10
             periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 30
+            initialDelaySeconds: 20
             periodSeconds: 10
             failureThreshold: 3
           resources:

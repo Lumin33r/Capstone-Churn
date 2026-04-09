@@ -37,9 +37,7 @@ spec:
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 2
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 30
+            failureThreshold: 3
           resources:
             requests:
               memory: "128Mi"
