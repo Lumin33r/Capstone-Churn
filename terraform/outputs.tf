@@ -21,3 +21,13 @@ output "sagemaker_invoke_role_arn" {
   description = "IAM role ARN for SageMaker invocation — share with teammates"
   value       = aws_iam_role.sagemaker_invoke_role.arn
 }
+
+output "aws_bedrock_guardrail_id" {
+  description = "ID of guardrail"
+  value       = aws_bedrock_guardrail.sentiment_analysis.guardrail_id
+}
+
+output "aws_bedrock_guardrail_name" {
+  description = "Name of guardrail"
+  value       = aws_bedrock_guardrail.sentiment_analysis.name
+}

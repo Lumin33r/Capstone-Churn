@@ -1,7 +1,7 @@
 
 # ── S3 Bucket for transcripts and model data ─────────────────────────
 
-# Input Customer Service Data 
+# Customer Service + Model Data 
 resource "aws_s3_bucket" "customer_bucket" {
   bucket = var.s3_bucket_name
 
