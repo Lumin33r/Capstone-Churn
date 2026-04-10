@@ -113,6 +113,7 @@ jobs:
             --from-literal=AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
             --from-literal=AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
             --dry-run=client -o yaml | kubectl apply -f -
+          kubectl delete secret kube-secrets -n retention-engine --ignore-not-found
           kubectl create secret generic kube-secrets \
             -n retention-engine \
             --from-literal=username=admin \
