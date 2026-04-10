@@ -5,8 +5,7 @@ import httpx
 import os
 from langchain.tools import tool
 
-SENTIMENT_URL = os.getenv(key="SENTIMENT_URL", default="http://localhost:8000")
-
+SENTIMENT_URL = os.getenv(key="SENTIMENT_PREDICTOR_URL", default="http://localhost:8000")
 
 @tool
 def analyze_call(transcript: str) -> str:

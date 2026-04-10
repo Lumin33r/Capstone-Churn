@@ -1,16 +1,16 @@
 import os
 import json
 import logging
+from typing import Any
 
 import boto3
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from typing import Any
-from services.agent_service.tools.bedrock_guardrails import get_guardrail_info
 
+
+# Initialization
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
@@ -25,21 +25,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SENTIMENT_ENDPOINT_NAME: str = os.getenv(key="SENTIMENT_ENDPOINT_NAME", default="sentiment-analysis-endpoint")
-AWS_REGION: str = os.getenv(key="AWS_REGION", default="us-east-1")
-
+SENTIMENT_ENDPOINT_NAME = os.getenv(key="SENTIMENT_ENDPOINT_NAME", default="sentiment-analysis-endpoint")
+AWS_REGION = os.getenv(key="AWS_REGION", default="us-east-1")
+GUARDRAIL_NAME = os.getenv(key="GUARDRAIL_NAME", default="sentiment-analysis-guardrail")
 
 sagemaker_runtime = boto3.client("sagemaker-runtime", region_name=AWS_REGION)
 
-with open(file="./model/label_encoder.json", mode="r") as f:
-    results = json.load(fp=f)
-    
-with open(file="./model/example_output.json", mode="r") as f:
-    example = json.load(fp=f)
-    
-with open(file="../../sagemaker/sentiment/sentiment_training.ipynb", mode="r", encoding="utf-8") as f:
-    notebook_json = json.load(fp=f)
 
+# Data Models
 class EmotionScores(BaseModel):
     anger: float = 0.71
     sadness: float = 0.33
@@ -50,6 +43,7 @@ class EmotionScores(BaseModel):
     surprise: float = 0.09
     confusion: float = 0.41
     neutral: float = 0.22
+
 
 class CallRecord(BaseModel):
     call_id: str = "CALL_000001"
@@ -88,59 +82,85 @@ class CallRecord(BaseModel):
     transfer_count: int = 0
     resolution_flag: bool = False
 
-prompt = f"""
+
+
+# File Loaders
+def load_model_files() -> dict[str, Any]:
+    """Load model metadata files dynamically at request time."""
+    with open(file="./model/label_encoder.json", mode="r") as f:
+        results = json.load(fp=f)
+
+    with open(file="./model/example_output.json", mode="r") as f:
+        example = json.load(fp=f)
+
+    return {"results": results, "example": example}
+
+
+def load_notebook() -> Any:
+    """
+        Load notebook content dynamically,
+        the contents of the file are large.
+    """
+    with open(file="../../sagemaker/sentiment/sentiment_training.ipynb", mode="r", encoding="utf-8") as f:
+        return json.load(fp=f)
+
+
+
+# Prompt Builder
+
+def build_prompt(results: dict, example: dict, notebook: dict, user_input: str) -> str:
+    return f"""
 AGENT INSTRUCTIONS: TRANSCRIPT SENTIMENT ANALYZER
 
 PERSONA
 You are a Senior Customer Experience Analyst specializing in linguistic sentiment analysis. 
-Your role is to serve as the initial intelligence layer in the Retention Engine 
-pipeline, specifically preparing data for a Churn Analysis Agent. 
-You are objective, precise, and highly sensitive to customer frustration markers.
+Your role is to serve as the initial intelligence layer in the Retention Engine pipeline.
 
 GOAL
-Analyze the provided customer service transcript to determine the sentiment, primary category of interaction, and a confidence score. Your analysis is critical because it will be combined with account data by a secondary agent to predict the likelihood of customer churn.
+Analyze the provided customer service transcript to determine the sentiment, primary category, 
+and a confidence score.
 
 CONSTRAINTS
-1. Input Validation: Before processing, you must verify the input length. 
-   - The transcript must be between 0 and 20,000 UTF-8 characters.
-   - If the transcript is shorter than 0 characters, return an error indicating "Insufficient data for analysis."
-   - If the transcript exceeds 20,000 characters, return an error indicating "Transcript exceeds maximum processing limit."
-2. Analysis Scope: Do not invent customer details. Only analyze the text provided.
-3. Sentiment Scale: Categorize sentiment strictly as "Positive", "Negative", or "Neutral".
-4. Category Mapping: Identify the primary reason for the call (e.g., Billing, Technical Support, Cancellation Request, General Inquiry, or Complaint).
+1. Transcript must be 0–20,000 UTF-8 characters.
+2. Do not invent customer details.
+3. Sentiment must be Positive, Negative, or Neutral.
+4. Identify the primary call category.
 
 CONTEXT:
-Additional context providing scripts to be used as tools to create the expect values: {notebook_json}
-use at your discretion
+Notebook tools:
+{json.dumps(obj=notebook)}
 
 USER_INPUT:
-{input}
+{user_input}
 
-OUTPUT FORMAT
-You must output your findings in a strict JSON format to ensure the Churn Analysis 
-Agent can parse the data programmatically. Do not include conversational filler or introductory text.
-
-Required JSON Structure:
-results: {results}
-and 
-example values: {example}
+OUTPUT FORMAT:
+results: {json.dumps(obj=results)}
+example: {json.dumps(obj=example)}
 """
 
 
-def check_prompt_with_guardrail(transcript: str, prompt: str) -> dict[str, Any]:
-    """
-    Runs Bedrock Guardrails against:
-    - the transcript
-    - the prompt template
-    - the notebook contents (tools)
-    - the combined input (prompt + transcript + notebook)
-    """
-    
+# Guardrail Logic
+def get_guardrail_info() -> dict[str, Any]:
+    bedrock = boto3.client("bedrock", region_name=AWS_REGION)
+    response = bedrock.list_guardrails()
+
+    for item in response.get("guardrails", []):
+        if item.get("name") == GUARDRAIL_NAME:
+            return {
+                "guardrail_id": item["id"],
+                "guardrail_version": item["version"],
+                "status": item["status"],
+                "description": item["description"],
+            }
+
+    raise ValueError(f"Guardrail '{GUARDRAIL_NAME}' not found.")
+
+
+def run_guardrails(prompt: str, transcript: str) -> dict[str, Any]:
     guardrail = get_guardrail_info()
+    runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
 
-    runtime = boto3.client("bedrock-runtime", region_name="us-east-1")
-
-    def run_guardrail_check(text: str) -> dict[str, Any]:
+    def check(text: str) -> dict[str, Any] | dict[str, bool]:
         payload = {"inputText": text}
         response = runtime.invoke_model(
             modelId="amazon.guardrails",
@@ -148,90 +168,82 @@ def check_prompt_with_guardrail(transcript: str, prompt: str) -> dict[str, Any]:
             guardrailVersion=guardrail["guardrail_version"],
             body=json.dumps(obj=payload)
         )
-
         output = json.loads(s=response["body"].read())
-
         if output.get("action") == "BLOCKED":
-            return {
-                "blocked": True,
-                "reason": output.get("message", "Content blocked by guardrail.")
-            }
-
+            return {"blocked": True, "reason": output.get("message")}
         return {"blocked": False}
 
-    # Check each component individually
     checks = {
-        "transcript": run_guardrail_check(text=transcript),
-        "prompt": run_guardrail_check(text=prompt),
-        "combined": run_guardrail_check(text=prompt + "\n\n" + transcript + "\n\n")
+        "transcript": check(text=transcript),
+        "prompt": check(text=prompt),
+        "combined": check(text=prompt + "\n\n" + transcript)
     }
 
-    # If any check fails, return the first failure
-    for key, result in checks.items():
+    for source, result in checks.items():
         if result["blocked"]:
-            return {
-                "blocked": True,
-                "source": key,
-                "reason": result["reason"]
-            }
+            return {"blocked": True, "source": source, "reason": result["reason"]}
 
     return {"blocked": False}
 
 
+
+# Sagemaker Invocation
+def invoke_sagemaker(prompt: str, transcript: str) -> dict[str, Any]:
+    payload = {
+        "inputs": f"{prompt}\n\nTranscript:\n{transcript}",
+        "parameters": {"temperature": 0.1, "max_new_tokens": 512}
+    }
+
+    response = sagemaker_runtime.invoke_endpoint(
+        EndpointName=SENTIMENT_ENDPOINT_NAME,
+        ContentType="application/json",
+        Body=json.dumps(obj=payload)
+    )
+
+    return json.loads(s=response["Body"].read().decode())
+
+
+
+# API Endpoints
 @app.get(path="/health")
 def health() -> dict[str, str]:
-    return {"status": "healthy", "model": "", "endpoint": SENTIMENT_ENDPOINT_NAME}
+    return {"status": "healthy", "endpoint": SENTIMENT_ENDPOINT_NAME}
+
 
 @app.post(path="/sentiment", response_model=CallRecord)
-def analyze_sentiment(transcript: str, input: str | None = None) -> dict[str, Any] | Any | dict[str, str]:
-    """
-    Validates constraints and inputs, and invokes the Bedrock Agent for sentiment analysis.
-    """
-    # UTF-8 Character Count Validation (0 - 20,000)
-    char_count = len(transcript.encode(encoding='utf-8'))
+def analyze_sentiment(transcript: str, input: str | None = None) -> dict[str, Any] | dict[str, Any] | dict[str, str]:
+
+    # Validate transcript length
+    char_count = len(transcript.encode(encoding="utf-8"))
     if char_count < 0:
         return {"error": "Insufficient data for analysis.", "char_count": char_count}
     if char_count > 20000:
         return {"error": "Transcript exceeds maximum processing limit.", "char_count": char_count}
 
+    # Load dynamic files
+    files = load_model_files()
+    notebook = load_notebook()
+
+    # Build prompt
+    prompt = build_prompt(
+        results=files["results"],
+        example=files["example"],
+        notebook=notebook,
+        user_input=input or ""
+    )
+
+    # Guardrail check
+    guardrail = run_guardrails(prompt=prompt, transcript=transcript)
+    if guardrail["blocked"]:
+        return {
+            "error": guardrail["reason"],
+            "blocked": True,
+            "source": guardrail["source"]
+        }
+
+    # Invoke Sagemaker
     try:
-        # Construct payload for the SageMaker LLM
-        payload = {
-            "inputs": f"{prompt}\n\nTranscript: {transcript}",
-            "parameters": {"temperature": 0.1, "max_new_tokens": 512}
-        }
-
-        guardrail = check_prompt_with_guardrail(transcript=transcript, prompt=prompt)
-        
-        if guardrail["blocked"]:
-            return {
-                "error": guardrail["reason"],
-                "blocked": True,
-                "source": guardrail["source"]
-        }
-
-        response = sagemaker_runtime.invoke_endpoint(
-            EndpointName=SENTIMENT_ENDPOINT_NAME,
-            ContentType="application/json",
-            Body=json.dumps(obj=payload)
-        )
-
-        result = json.loads(s=response["Body"].read().decode())
-        return result
-
+        return invoke_sagemaker(prompt=prompt, transcript=transcript)
     except Exception as e:
+        logger.exception(msg="Sagemaker invocation failed")
         return {"error": str(object=e), "status": "failure"}
-
-
-if __name__ == "__main__":
-    # Example Usage
-    sample_transcript = """
-    Customer: I am extremely frustrated with my billing statement this month. 
-    I was promised a discount that isn't showing up, and if this isn't fixed, 
-    I'm going to look for another provider by the end of the week.
-    Agent: I'm very sorry to hear that, let me look into your account immediately.
-    """
-    
-    result = analyze_sentiment(transcript=sample_transcript)
-    print(json.dumps(obj=result, indent=2))
-    
