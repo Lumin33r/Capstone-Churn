@@ -1,7 +1,7 @@
 # LLM Usage Log — Troy
 
 **Tool:** GitHub Copilot (Claude Opus 4.6, VS Code Chat)
-**Period:** April 7, 2026
+**Period:** April 7–9, 2026
 
 ---
 
@@ -468,3 +468,124 @@ RuntimeError: Model /opt/ml/model/feature_columns.json cannot be loaded
 7. **Execution order matters in CI scripts** — the skip logic placement bug (Task 17) showed that checking endpoint health _after_ uploading a new model tar defeats the purpose of the check. The order must be: check → skip OR package → upload → deploy.
 8. **SageMaker rollback creates stale-model traps** — when `update_endpoint` fails, SageMaker rolls back to the previous config. The endpoint returns to InService but serves the old model. A full delete → recreate is the only reliable way to force a new model tar.
 9. **LLM missteps are recoverable** — the SAGEMAKER_PROGRAM removal (Task 20) was wrong, but the error was diagnosable from CloudWatch logs in one iteration. The corrected fix (restore SAGEMAKER_PROGRAM + add CSV to inference.py) addressed the real constraint.
+
+---
+
+### 25. Merge Main into troy/test-workflows — Branch Sync & Conflict Resolution
+
+**What I asked:** `troy/test-workflows` fell behind main after the team merged several PRs (#52, #53, #55). What are the differences, and how do I get current?
+
+**LLM output:**
+
+- Compared branches: main had 10 new commits (George's infra-agent PR #55, Kathleen's drift-roadmap PR #53, Troy's terraform-workflow PR #52)
+- Key changes on main: K8s port fixes (agent 8000→8080, churn 8000→8001), ConfigMap URL rename (qa-evaluator→sentiment-analysis), SageMaker deploy.py switch to native XGBoost, new `terraform/backend.tf` with S3 remote state
+- Explained merge vs rebase tradeoffs; recommended merge since it's a shared branch
+- Guided through conflict resolution in `sagemaker/churn/deploy.py` (2 conflicts — both resolved by accepting main's native XGBoost changes)
+
+**My evaluation:** Clear branch comparison and conflict walkthrough. The merge approach was correct for a shared branch. Both conflicts were straightforward — main's version was the right one since Kathleen's XGBoost fix was intentional.
+
+---
+
+### 26. Fix Duplicate Terraform Backend Block
+
+**What I asked:** `terraform init` failed with "Duplicate backend configuration" — S3 backend defined in both `backend.tf` and `providers.tf`.
+
+**LLM analysis:** The merge brought in George's `backend.tf` (PR #55) while `providers.tf` already had the same block. Both were identical.
+
+**LLM fix:** Removed the backend block from `providers.tf`, keeping it in `backend.tf` which has the documentation comments.
+
+**My evaluation:** Obvious merge artifact. Quick fix.
+
+---
+
+### 27. Remove SageMaker Resources from Terraform
+
+**What I asked:** Terraform `apply` failed with "Cannot create already existing model" because both `sagemaker.tf` and `sagemaker-deploy.yml` (Python boto3) managed the same SageMaker resources. Which should own them?
+
+**LLM analysis:**
+
+- Two systems creating the same resources (model, endpoint config, endpoint) for both churn and sentiment
+- `deploy.py` handles packaging, upload, health checks, inference validation, and deploy/delete — purpose-built for ML endpoints
+- Terraform is better suited for foundational infra (IAM, S3, networking, EKS)
+- Recommended removing SageMaker resources from Terraform
+
+**LLM fix:** Replaced all SageMaker resource blocks in `sagemaker.tf` with a comment pointing to `sagemaker-deploy.yml`. Removed orphaned `sentiment_endpoint_name` variable from `variables.tf`.
+
+**My evaluation:** Right call. ML endpoints change frequently (retrained models, new artifacts) — that's operational, not infrastructure. Clean separation of concerns.
+
+---
+
+### 28. Fix K8s `secrets.yaml` — `Secrets` vs `Secret`
+
+**What I asked:** `kubectl apply -f k8s/secrets.yaml` failed with "resource mapping not found for kind `Secrets` in version `v1`".
+
+**LLM fix:** Changed `kind: Secrets` → `kind: Secret` (singular) on both resources. Kubernetes resource kinds are always singular.
+
+**My evaluation:** Typo fix. Quick catch.
+
+---
+
+### 29. Number Workflow Names for Run Order
+
+**What I asked:** Add numbers to workflow names so they sort in order in the Actions tab.
+
+**LLM fix:** Renamed:
+
+- `Terraform — Infrastructure` → `1 — Terraform Infrastructure`
+- `SageMaker — Deploy Endpoints` → `2 — SageMaker Endpoints`
+- `Deploy — Build & Roll Out to EKS` → `3 — Build & Roll Out to EKS`
+
+**My evaluation:** Simple UX improvement. Shows the team the execution order at a glance.
+
+---
+
+### 30. Add Deployment Summary to deploy.yml
+
+**What I asked:** `deploy.yml` doesn't show endpoint URLs after completion. Add a summary.
+
+**LLM fix:** Added a `Deployment Summary` step using `$GITHUB_STEP_SUMMARY` that queries `kubectl get svc` for each service and outputs a markdown table with endpoint URLs, ports, and status.
+
+**My evaluation:** Good addition. The summary shows up in the Actions run page so the team can grab URLs without digging through logs.
+
+---
+
+### 31. Fix K8s Secrets — GitHub Secrets Instead of Static YAML
+
+**What I asked:** `deploy.yml` was applying `k8s/secrets.yaml` which had literal `${AWS_ACCESS_KEY_ID}` placeholders. The pods would get the string `${AWS_ACCESS_KEY_ID}` as their credentials.
+
+**LLM fix:**
+
+- Removed `kubectl apply -f k8s/secrets.yaml` from the workflow
+- Added a step that creates secrets from GitHub repo secrets using `kubectl create secret generic --dry-run=client -o yaml | kubectl apply -f -`
+- `kube-secrets` required a `kubectl delete --ignore-not-found` first because the existing secret had `type: kubernetes.io/basic-auth` and Kubernetes won't allow changing a Secret's type via apply
+
+**My evaluation:** Critical fix. Without this, every pod referencing `aws-secrets` would have empty/broken AWS credentials. The `--dry-run | apply` pattern is idempotent — safe for reruns.
+
+---
+
+### 32. deploy.yml Rollout Timeout Analysis
+
+**What I asked:** `agent-service` deployment timed out with "0 out of 1 new replicas have been updated". What other errors will it hit?
+
+**LLM analysis:** Identified 3 additional issues beyond the timeout:
+
+1. **`k8s/secrets.yaml` placeholders** — already fixed in Task 31
+2. **Build matrix vs deployment mismatch** — `deploy.yml` builds 4 images but applies 7 deployment manifests. `backend-deployment`, `churn-wrapper-deployment`, `transcript-wrapper-deployment` have no built images → will sit in `ImagePullBackoff`
+3. **Rollout wait only checks 3 of 7 deployments** — unbuilt ones fail silently
+
+**My evaluation:** Good audit. The build-vs-deploy mismatch is the next thing to address with the team.
+
+---
+
+## Running List of Changes (This Session — April 9, 2026)
+
+| Commit | File(s) | Change |
+|--------|---------|--------|
+| `72079ee` | multiple | Merged `origin/main` into `troy/test-workflows` (PRs #52, #53, #55) |
+| `5da84ed` | `terraform/providers.tf` | Removed duplicate S3 backend block (kept in `backend.tf`) |
+| `cf63e10` | `terraform/sagemaker.tf`, `terraform/variables.tf` | Removed all SageMaker model/endpoint/config resources; managed by `sagemaker-deploy.yml` |
+| `8bf16b2` | `.github/workflows/deploy.yml` | Added Deployment Summary step with service URLs table via `$GITHUB_STEP_SUMMARY` |
+| `d2d26d7` | `k8s/secrets.yaml` | Fixed `kind: Secrets` → `kind: Secret` (singular) |
+| `3cd6c35` | `.github/workflows/terraform.yml`, `sagemaker-deploy.yml`, `deploy.yml` | Numbered workflow names: 1 — Terraform, 2 — SageMaker, 3 — Build & Roll Out |
+| `2a21d56` | `.github/workflows/deploy.yml` | Replaced `kubectl apply -f k8s/secrets.yaml` with `kubectl create secret` from GitHub secrets |
+| `70c2dcb` | `.github/workflows/deploy.yml` | Added `kubectl delete kube-secrets --ignore-not-found` before recreate to handle type change |
