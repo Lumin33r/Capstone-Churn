@@ -479,4 +479,7 @@ if __name__ == "__main__":
         s3_uri = upload_to_s3(tar_path=tar_path)
         create_endpoint(s3_uri=s3_uri)
         os.remove(path="./model.tar.gz")
+        os.remove(path="./mlflow.db")
+        if os.path.isdir(s="./model"):
+            shutil.rmtree(path="./model")
     atexit.register(shutdown_threads)

@@ -16,13 +16,15 @@
   "word_count",
   "avg_word_length",
   "num_exclamation_marks",
+  "frustration_level",
   "emotion_scores",
   "toxicity_score",
-  "frustration_level",
   "escalation_probability",
   "agent_turns",
   "customer_turns",
   "agent_empathy_score",
   "billing_dispute_flag",
-  "outage_history_flag"
+  "outage_history_flag",
+  "qa_score",
+  "sentiment_drift"
 ]
