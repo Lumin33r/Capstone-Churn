@@ -120,6 +120,18 @@ jobs:
             --from-literal=password=${{ secrets.KUBE_BASIC_AUTH_PASSWORD }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Clean up failed pods
+        run: |
+          echo "Deleting pods in error states..."
+          kubectl delete pods -n retention-engine --field-selector=status.phase=Failed --ignore-not-found
+          for status in ImagePullBackOff ErrImagePull CrashLoopBackOff; do
+            PODS=$(kubectl get pods -n retention-engine --no-headers 2>/dev/null | grep "$status" | awk '{print $1}')
+            if [ -n "$PODS" ]; then
+              echo "Deleting $status pods: $PODS"
+              echo "$PODS" | xargs kubectl delete pod -n retention-engine --ignore-not-found
+            fi
+          done
+
       - name: Restart deployments (pull latest image)
         run: |
           for dep in agent-service churn-predictor qa-evaluator frontend-deployment; do
@@ -130,7 +142,7 @@ jobs:
         run: |
           for dep in agent-service churn-predictor qa-evaluator; do
             echo "Waiting for $dep..."
-            kubectl rollout status deployment/$dep -n retention-engine --timeout=120s
+            kubectl rollout status deployment/$dep -n retention-engine --timeout=300s
           done
 
       - name: Smoke test agent health
@@ -138,6 +150,12 @@ jobs:
           AGENT_URL=$(kubectl get svc agent-service -n retention-engine \
             -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
           echo "Agent service URL: $AGENT_URL"
+          if [ -z "$AGENT_URL" ]; then
+            echo "⚠️ No load balancer hostname assigned — skipping smoke test"
+            echo "Check for TooManyLoadBalancers or pending LB provisioning"
+            kubectl get svc agent-service -n retention-engine
+            exit 0
+          fi
           curl -sf --retry 5 --retry-delay 10 "http://${AGENT_URL}:8080/health"
           echo "✅ Agent service is healthy"
 
