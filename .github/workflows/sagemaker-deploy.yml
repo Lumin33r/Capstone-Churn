@@ -3,7 +3,7 @@
 # Run AFTER terraform.yml has provisioned IAM roles and S3
 # See: CAPSTONE/docs/cicd-sagemaker-deploy.md
 
-name: SageMaker — Deploy Endpoints
+name: 2 — SageMaker Endpoints
 
 on:
   workflow_dispatch:

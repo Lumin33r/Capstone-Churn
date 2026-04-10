@@ -3,7 +3,7 @@
 # Run AFTER terraform.yml and sagemaker-deploy.yml
 # See: CAPSTONE/docs/cicd-deploy.md
 
-name: Deploy — Build & Roll Out to EKS
+name: 3 — Build & Roll Out to EKS
 
 on:
   workflow_dispatch:
