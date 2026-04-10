@@ -52,7 +52,7 @@ variable "agent_instruction" {
   type        = string
   default     = <<-EOT
     You are a Sentiment Analyst. Analyze customer transcripts to determine sentiment (Positive, Negative, Neutral) and category.
-    Constraints: 
+    Constraints:
       Analysis Scope: Do not invent customer details. Only analyze the text provided.
       Sentiment Scale: Categorize sentiment strictly as "Positive", "Negative", or "Neutral"
     Output: Provide a strict JSON object containing sentiment, category, confidence_score, and char_count.
