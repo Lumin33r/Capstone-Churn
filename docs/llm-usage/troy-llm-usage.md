@@ -577,15 +577,32 @@ RuntimeError: Model /opt/ml/model/feature_columns.json cannot be loaded
 
 ---
 
+### 33. Quota Exhaustion — Delete Broken Deployments & Clean Up Manifests
+
+**What I asked:** `agent-service` rollout kept timing out. `kubectl get pods` showed 6 pods in `ImagePullBackOff` consuming 10/10 pod quota, 4/4 CPU, 4Gi/4Gi memory — leaving zero room for `agent-service`.
+
+**LLM analysis:** 5 deployments (`backend-deployment`, `churn-wrapper-deployment`, `sentiment-predictor`, `sentiment-wrapper-deployment`, `transcript-wrapper-deployment`) had no Docker images in GHCR — the build matrix only builds 4 services. These dead pods consumed the entire namespace quota.
+
+**LLM fix:**
+
+1. Deleted the 5 broken deployments from the cluster: `kubectl delete deployment ... --ignore-not-found`
+2. Removed 3 deployment YAML files from `k8s/deployments/` (`backend-deployment.yaml`, `churn-wrapper-deployment.yaml`, `transcript-wrapper-deployment.yaml`) so they won't be recreated on the next `kubectl apply`
+3. Also identified `TooManyLoadBalancers` AWS account limit as a secondary blocker
+
+**My evaluation:** Right call. The remaining 4 deployment manifests (`agent`, `churn-predictor`, `frontend`, `qa-evaluator`) now match the build matrix exactly. Quota freed up for `agent-service` to schedule.
+
+---
+
 ## Running List of Changes (This Session — April 9, 2026)
 
-| Commit | File(s) | Change |
-|--------|---------|--------|
-| `72079ee` | multiple | Merged `origin/main` into `troy/test-workflows` (PRs #52, #53, #55) |
-| `5da84ed` | `terraform/providers.tf` | Removed duplicate S3 backend block (kept in `backend.tf`) |
-| `cf63e10` | `terraform/sagemaker.tf`, `terraform/variables.tf` | Removed all SageMaker model/endpoint/config resources; managed by `sagemaker-deploy.yml` |
-| `8bf16b2` | `.github/workflows/deploy.yml` | Added Deployment Summary step with service URLs table via `$GITHUB_STEP_SUMMARY` |
-| `d2d26d7` | `k8s/secrets.yaml` | Fixed `kind: Secrets` → `kind: Secret` (singular) |
-| `3cd6c35` | `.github/workflows/terraform.yml`, `sagemaker-deploy.yml`, `deploy.yml` | Numbered workflow names: 1 — Terraform, 2 — SageMaker, 3 — Build & Roll Out |
-| `2a21d56` | `.github/workflows/deploy.yml` | Replaced `kubectl apply -f k8s/secrets.yaml` with `kubectl create secret` from GitHub secrets |
-| `70c2dcb` | `.github/workflows/deploy.yml` | Added `kubectl delete kube-secrets --ignore-not-found` before recreate to handle type change |
+| Commit    | File(s)                                                                 | Change                                                                                        |
+| --------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `72079ee` | multiple                                                                | Merged `origin/main` into `troy/test-workflows` (PRs #52, #53, #55)                           |
+| `5da84ed` | `terraform/providers.tf`                                                | Removed duplicate S3 backend block (kept in `backend.tf`)                                     |
+| `cf63e10` | `terraform/sagemaker.tf`, `terraform/variables.tf`                      | Removed all SageMaker model/endpoint/config resources; managed by `sagemaker-deploy.yml`      |
+| `8bf16b2` | `.github/workflows/deploy.yml`                                          | Added Deployment Summary step with service URLs table via `$GITHUB_STEP_SUMMARY`              |
+| `d2d26d7` | `k8s/secrets.yaml`                                                      | Fixed `kind: Secrets` → `kind: Secret` (singular)                                             |
+| `3cd6c35` | `.github/workflows/terraform.yml`, `sagemaker-deploy.yml`, `deploy.yml` | Numbered workflow names: 1 — Terraform, 2 — SageMaker, 3 — Build & Roll Out                   |
+| `2a21d56` | `.github/workflows/deploy.yml`                                          | Replaced `kubectl apply -f k8s/secrets.yaml` with `kubectl create secret` from GitHub secrets |
+| `70c2dcb` | `.github/workflows/deploy.yml`                                          | Added `kubectl delete kube-secrets --ignore-not-found` before recreate to handle type change  |
+| `9bea5b6` | `k8s/deployments/backend-deployment.yaml`, `churn-wrapper-deployment.yaml`, `transcript-wrapper-deployment.yaml` | Removed deployment manifests for services with no Docker images |
