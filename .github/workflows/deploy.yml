@@ -127,3 +127,24 @@ jobs:
           echo "Agent service URL: $AGENT_URL"
           curl -sf --retry 5 --retry-delay 10 "http://${AGENT_URL}:8080/health"
           echo "✅ Agent service is healthy"
+
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Service | Endpoint | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|----------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          for svc in agent-service churn-predictor-service frontend-service; do
+            HOST=$(kubectl get svc "$svc" -n retention-engine \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "N/A")
+            PORT=$(kubectl get svc "$svc" -n retention-engine \
+              -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo "N/A")
+            if [ "$HOST" != "N/A" ] && [ -n "$HOST" ]; then
+              echo "| $svc | http://${HOST}:${PORT} | ✅ |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| $svc | ClusterIP only | ⚠️ |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tag:** \`${{ inputs.tag }}\`  " >> "$GITHUB_STEP_SUMMARY"
+          echo "**Service:** \`${{ inputs.service }}\`" >> "$GITHUB_STEP_SUMMARY"
