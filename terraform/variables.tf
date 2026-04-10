@@ -47,12 +47,6 @@ variable "agent_model" {
   }
 }
 
-variable "sentiment_endpoint_name" {
-  description = "Name of the SageMaker endpoint for sentiment analysis"
-  type        = string
-  default     = "sentiment-analysis-endpoint"
-}
-
 variable "agent_instruction" {
   description = "The system prompt for the Bedrock agent. Defines its behavior and persona required for downstream churn analysis."
   type        = string
