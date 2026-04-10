@@ -145,9 +145,9 @@ def output_fn(prediction: Dict[str, Any], accept: str) -> Tuple[str, Literal["ap
             }
 
             # Attach full schema
-            if sentiment_schema is not None:
-                result.update(sentiment_schema) 
-            results.append(result)
+            # if sentiment_schema is not None:
+                # result.update(sentiment_schema) 
+            # results.append(result)
             
         logger.info(msg="[output_fn] Serializing output.")
         return json.dumps(obj=results), "application/json"
