@@ -22,11 +22,10 @@ metadata:
   annotations:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT_ID:certificate/CERTIFICATE_ID
-    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
     alb.ingress.kubernetes.io/healthcheck-path: /health
-    alb.ingress.kubernetes.io/tags: Team=retention-engine
+    alb.ingress.kubernetes.io/subnets: subnet-0e7f68798fdc00dfe, subnet-047e643b05c5d7313
+    alb.ingress.kubernetes.io/tags: Team=retention-engine,Environment=staging
 spec:
   ingressClassName: alb
   rules:
