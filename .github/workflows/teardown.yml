@@ -152,7 +152,7 @@ jobs:
         working-directory: terraform
         run: |
           echo "🔴 Destroying Terraform-managed resources..."
-          echo "   Preserving: S3 bucket, sagemaker-execution-role"
+          echo "   Preserving: S3 bucket, sagemaker-execution-role, ALB controller IAM policy (Troy lacks iam:DeletePolicyVersion)"
           terraform destroy -var="environment=dev" -auto-approve \
             -target=aws_iam_role_policy.bedrock_invoke_policy \
             -target=aws_iam_role.bedrock_role \
@@ -160,9 +160,7 @@ jobs:
             -target=aws_iam_role.sagemaker_invoke_role \
             -target=aws_iam_role_policy.sagemaker_featurestore_policy \
             -target=aws_iam_role.sagemaker_featurestore_role \
-            -target=aws_iam_role_policy_attachment.alb_controller \
             -target=aws_iam_role.alb_controller \
-            -target=aws_iam_policy.alb_controller \
             -target=aws_s3_bucket_notification.audio_upload_trigger \
             -target=aws_lambda_permission.allow_s3_invoke \
             -target=aws_lambda_function.transcribe_pipeline \
