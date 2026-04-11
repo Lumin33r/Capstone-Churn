@@ -149,7 +149,6 @@ jobs:
             -target=aws_iam_role_policy_attachment.alb_controller \
             -target=aws_iam_role.alb_controller \
             -target=aws_iam_policy.alb_controller \
-            -target=aws_iam_openid_connect_provider.eks \
             -target=aws_s3_bucket_notification.audio_upload_trigger \
             -target=aws_lambda_permission.allow_s3_invoke \
             -target=aws_lambda_function.transcribe_pipeline \
