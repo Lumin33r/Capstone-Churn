@@ -1,7 +1,7 @@
 # LLM Usage Log — Troy
 
 **Tool:** GitHub Copilot (Claude Opus 4.6, VS Code Chat)
-**Period:** April 7–9, 2026
+**Period:** April 7–11, 2026
 
 ---
 
@@ -606,3 +606,224 @@ RuntimeError: Model /opt/ml/model/feature_columns.json cannot be loaded
 | `2a21d56` | `.github/workflows/deploy.yml`                                                                                   | Replaced `kubectl apply -f k8s/secrets.yaml` with `kubectl create secret` from GitHub secrets |
 | `70c2dcb` | `.github/workflows/deploy.yml`                                                                                   | Added `kubectl delete kube-secrets --ignore-not-found` before recreate to handle type change  |
 | `9bea5b6` | `k8s/deployments/backend-deployment.yaml`, `churn-wrapper-deployment.yaml`, `transcript-wrapper-deployment.yaml` | Removed deployment manifests for services with no Docker images                               |
+
+---
+
+## Session 2 — April 11, 2026
+
+### 34. ALB Ingress Architecture — Replace Per-Service LoadBalancers
+
+**What I asked:** Replace individual LoadBalancer services with a single ALB Ingress to consolidate all traffic through one DNS endpoint.
+
+**LLM output:**
+
+- Created `terraform/alb-controller.tf` — OIDC provider, IAM policy, IAM role with IRSA trust for the ALB controller service account
+- Created `k8s/ingress.yaml` — ALB Ingress with path-based routing (`/` → frontend, `/agent-api/` → agent-service, `/churn-api/` → churn-predictor)
+- Created `k8s/services/frontend-service.yaml` — ClusterIP service for frontend (previously had none)
+- Created `scripts/install-alb-controller.sh` — Helm install script for the AWS Load Balancer Controller
+- Converted existing LoadBalancer services to ClusterIP
+
+**My evaluation:** Correct architecture. Single ALB reduces cost and gives one DNS endpoint for all traffic instead of 3+ separate ELB hostnames.
+
+---
+
+### 35. Five Configuration Bugs Fixed (PR #62)
+
+**What I asked:** Frontend can't reach backend services through the ALB. Debug and fix everything.
+
+**LLM analysis and fixes:**
+
+1. **Nginx reverse proxy** — Frontend's `nginx.conf` had no proxy rules. Added `location /agent-api/` and `/churn-api/` blocks proxying to backend ClusterIP services. Updated Dockerfile with `VITE_API_BASE_URL` build arg so React builds with the correct API prefix.
+
+2. **Ingress routing** — Simplified path annotations. The ALB routes `/agent-api/*` to agent-service, nginx handles the rest.
+
+3. **ConfigMap fix** — `agent-config.yaml` had `QA_EVALUATOR_URL` pointing to wrong hostname. Fixed to match the actual service name.
+
+4. **SageMaker endpoint name** — Hardcoded endpoint name in agent-service didn't match the actual deployed endpoint (`churn-predictor-endpoint`).
+
+5. **ChatBedrock source code bug** — `chains/churn_analysis.py` used `ChatBedrock(model=..., region=...)` but the LangChain API requires `model_id=` and `region_name=`. Also pinned `pydantic<2.0` to fix a separate import error.
+
+**My evaluation:** All 5 were real bugs preventing end-to-end functionality. The ChatBedrock parameter names were the most subtle — the old parameter names silently fell back to defaults.
+
+---
+
+### 36. Terraform State Cleanup — 19 Orphaned Resources
+
+**What I asked:** `terraform plan` showed 11 destroys. The state had resources that no longer existed in `.tf` files.
+
+**LLM analysis:** After removing SageMaker resources from Terraform (Task 27), the state file still tracked them. Additionally, old resource names from before the refactor cluttered the state.
+
+**LLM actions:**
+
+- Removed 19 orphaned resources from state using `terraform state rm`
+- Re-imported S3 resources that had provider schema mismatches
+- Achieved clean plan: **9 to add, 0 to change, 0 to destroy**
+
+**My evaluation:** Careful state surgery. The LLM checked each resource before removing and verified the final plan was clean.
+
+---
+
+### 37. Teardown Workflow (PR #64) — Safe Infrastructure Teardown
+
+**What I asked:** Create a teardown workflow for full CI/CD pipeline testing — tear everything down, then rebuild from scratch using the 3 dispatch workflows.
+
+**LLM output:** Created `.github/workflows/teardown.yml` with:
+
+- **Safety gate** — must type `TEARDOWN` to confirm
+- **Scope selection** — all, terraform-only, kubernetes-only, or alb-controller-only
+- **4 phases** — delete ingress → delete namespace → uninstall Helm chart → terraform destroy
+- **Preserves** — EKS cluster, SageMaker endpoints, S3 buckets, sagemaker-execution-role (all pre-existing, not managed by TF)
+- **Rebuild instructions** in summary — terraform apply → sagemaker deploy → k8s deploy (3 clicks)
+
+Also automated ALB controller Helm install as a post-apply step in `terraform.yml`, so the rebuild pipeline is fully automated.
+
+**My evaluation:** Well-designed safety gates. The scope options let you tear down just K8s without touching Terraform, which is useful for testing deploy.yml in isolation.
+
+---
+
+### 38. Teardown Execution — Finalizer Stuck on Ingress
+
+**What I asked:** Ran the teardown workflow. The ingress deletion hung for 5+ minutes.
+
+**LLM analysis:** The ALB Ingress had a `ingress.k8s.aws/resources` finalizer that blocks deletion until the ALB controller confirms the AWS resources (ALB, target groups, listeners) are cleaned up. Since the controller was being deleted in the same teardown, nothing was there to clear the finalizer.
+
+**LLM fix:** Updated `teardown.yml` to:
+1. Delete ingress with `--timeout=120s`
+2. If timeout, force-remove the finalizer with `kubectl patch --type=json -p='[{"op": "remove", "path": "/metadata/finalizers"}]'`
+3. Capture ALB hostname before deletion, then poll AWS until the actual ALB is gone
+
+**My evaluation:** Right fix. The ordering issue (deleting the controller before the ingress finalizer resolves) is a common Kubernetes teardown trap. The fallback patch is safe because we're tearing down everything anyway.
+
+---
+
+### 39. Terraform Import Marathon — Pre-Existing AWS Resources
+
+**What I asked:** After teardown, `terraform apply` in CI kept failing with "already exists" errors for resources that existed in AWS but not in Terraform state.
+
+**LLM actions:** Imported 7 resources across multiple CI runs:
+
+| Resource | Import ID | Why Missing |
+|----------|-----------|-------------|
+| `aws_iam_openid_connect_provider.eks` | Full ARN | Created by teammate's script, never in TF |
+| `aws_iam_policy.alb_controller` | Policy ARN | Created by previous apply, state lost |
+| `aws_iam_role.alb_controller` | Role name | Same — partial apply |
+| `aws_iam_role.transcribe_lambda_role` | Role name | Created by Kathleen's PR, never in TF |
+| `aws_lambda_function.transcribe_pipeline` | Function name | Partial apply created it, then errored on `AWS_REGION` |
+| `aws_lambda_permission.allow_s3_invoke` | `function/statement_id` | Partial apply created it, next run couldn't |
+| `aws_s3_bucket_notification.audio_upload_trigger` | Bucket name | Same pattern |
+
+**My evaluation:** Each import was necessary — the resources genuinely existed in AWS. The root cause was partial applies: Terraform creates resource A, then fails on resource B, but only records A in state if the apply step completes. Since CI uses `tfplan` files and the apply step fails, nothing gets recorded.
+
+**Key learning:** After a failed `terraform apply`, always check what was partially created in AWS before re-running. Import first, then re-apply.
+
+---
+
+### 40. Transcribe Lambda Role — Description Drift
+
+**What I asked:** `terraform plan` showed a change on `transcribe_lambda_role` — trying to null the description.
+
+**LLM analysis:** The imported role had `description = "Lambda role for Transcribe pipeline"` in AWS, but `transcribe.tf` had no description field. Terraform treated this as drift and wanted to remove it, which requires `iam:UpdateRoleDescription` — a permission Troy's IAM user didn't have.
+
+**LLM fix:** Added `description = "Lambda role for Transcribe pipeline"` to `transcribe.tf` to match AWS.
+
+**My evaluation:** Correct. Aligning the config with reality (rather than trying to change AWS) avoids the permission issue entirely.
+
+---
+
+### 41. Reserved Lambda Environment Variable — `AWS_REGION`
+
+**What I asked:** Lambda creation failed with `InvalidParameterValueException: contains reserved keys: AWS_REGION`.
+
+**LLM fix:** Removed `AWS_REGION = "us-east-1"` from the Lambda's environment variables in `transcribe.tf`. Lambda sets `AWS_REGION` automatically from the function's configured region — you can't override it.
+
+**My evaluation:** Fast fix. AWS Lambda reserves several environment variable names (`AWS_REGION`, `AWS_ACCESS_KEY_ID`, etc.) — they're injected by the runtime.
+
+---
+
+### 42. ALB Controller Helm Install — Cluster Name ARN Issue
+
+**What I asked:** `terraform.yml` ALB controller install step failed with `InvalidParameterException: The parameter name contains invalid characters`.
+
+**LLM analysis:** `kubectl config view --minify -o jsonpath='{.contexts[0].context.cluster}'` returned the full ARN (`arn:aws:eks:us-east-1:388691194728:cluster/eks-ezvrmopo-okl`) instead of just the cluster name. The Helm `--set clusterName=` flag and `aws eks describe-cluster --name` both expect the short name.
+
+**LLM fix:** Added `CLUSTER_NAME="${RAW_CLUSTER##*/}"` to strip the ARN prefix using bash parameter expansion.
+
+**My evaluation:** Clean fix. The kubeconfig stores clusters by ARN when created via `aws eks update-kubeconfig`. This is a local-vs-CI divergence — locally you might have the short name, CI gets the ARN.
+
+---
+
+### 43. Deploy Smoke Test — DNS Resolution Timeout
+
+**What I asked:** `deploy.yml` smoke test failed with curl exit code 6 (DNS resolution failure) on the new ALB hostname.
+
+**LLM analysis:** New ALBs take 1-3 minutes for DNS to propagate. The existing `curl --retry 5 --retry-delay 10` only retries on HTTP errors, not DNS failures.
+
+**LLM fix:** Added a DNS resolution wait loop (up to 3 min with `nslookup`) before the curl, and added `--retry-all-errors` to curl so it retries on DNS failures too. Gracefully skips the smoke test if DNS doesn't resolve.
+
+**My evaluation:** Good resilience improvement. The smoke test is informational — it shouldn't fail the whole deploy just because DNS hasn't propagated yet.
+
+---
+
+### 44. GitHub Actions Secret Masking — `AWS_REGION` Breaks ALB URLs
+
+**What I asked:** The deployment summary showed `k8s-retentio-retentio-08beda03dc-1707420489.***.elb.amazonaws.com` — the region was masked with `***`.
+
+**LLM analysis:** `AWS_REGION` was stored as a GitHub **secret**, so GitHub Actions masked every occurrence of `us-east-1` in all logs and summaries — including inside the ALB hostname. A region is not sensitive data.
+
+**LLM fix:** Changed all 5 workflow files from `${{ secrets.AWS_REGION }}` to `${{ vars.AWS_REGION }}`. Variables are not masked in output.
+
+**Post-fix steps (manual):** Added `AWS_REGION` as a repository variable (`us-east-1`) and deleted the `AWS_REGION` secret.
+
+**My evaluation:** Root cause correctly identified. The `vars` vs `secrets` distinction is important: secrets get masked everywhere (even inside unrelated strings like hostnames), variables don't. Region, account ID, and cluster names should be variables, not secrets.
+
+---
+
+### 45. Full Pipeline Rebuild — End-to-End Validation
+
+**What I did:** After all fixes, executed the full 3-step rebuild:
+
+1. **Terraform Apply** (Workflow #1) — Created remaining resources (ALB controller policy attachment, transcribe policy, Lambda, Lambda permission, S3 notification), installed ALB controller via Helm
+2. **SageMaker Deploy** (Workflow #2) — Validated existing endpoints (churn-predictor, retention-sentiment-analysis) — both InService, skipped redeployment
+3. **Build & Roll Out to EKS** (Workflow #3) — Built 4 Docker images, pushed to GHCR, deployed to EKS, applied ingress, ALB provisioned
+
+**Result:** All 3 workflows completed successfully. Frontend accessible at `http://k8s-retentio-retentio-08beda03dc-1707420489.us-east-1.elb.amazonaws.com`.
+
+**Key insight:** The full teardown → rebuild cycle exposed 7 issues (Tasks 39–44) that would never surface in normal incremental deploys. This is exactly why teardown testing is valuable.
+
+---
+
+## Instances Where I Provided Guidance (Session 2)
+
+### 6. Cherry-Pick vs Branch Workflow
+
+**Situation:** Two commits (transcribe description fix + finalizer fix) were pushed to `troy/teardown-workflow` after PR #64 was already merged. They were orphaned — not on main.
+**LLM action:** Cherry-picked both commits onto main and pushed directly (bypassing branch protection as repo admin).
+**My evaluation:** Right approach for hotfixes during active pipeline testing. Would use a PR for non-urgent changes.
+
+### 7. Direct-to-Main for CI Iteration
+
+**Situation:** Every workflow fix required a commit to main before CI could pick it up. Creating PRs for each iteration would have been 10+ PRs in one session.
+**My decision:** Pushed directly to main using admin bypass for all Session 2 fixes. This was a conscious choice for iteration speed during pipeline testing — not a permanent workflow change.
+
+---
+
+## Running List of Changes (Session 2 — April 11, 2026)
+
+| Commit | File(s) | Change |
+|--------|---------|--------|
+| `447a007` | `terraform/alb-controller.tf`, `k8s/ingress.yaml`, `k8s/services/frontend-service.yaml`, `scripts/install-alb-controller.sh` | ALB Ingress architecture — single ALB replaces per-service LoadBalancers |
+| `232ab88` | `frontend/nginx.conf`, `frontend/Dockerfile`, `k8s/configmaps/agent-config.yaml`, `k8s/deployments/qa-evaluator-deployment.yaml` | Nginx reverse proxy, correct service URLs, SageMaker endpoint name |
+| `71667b2` | `services/agent-service/chains/churn_analysis.py`, `requirements.txt` | ChatBedrock `model=` → `model_id=`, `region=` → `region_name=`, pin pydantic<2.0 |
+| `f083df9` | `terraform/alb-controller.tf` | Add DescribeListenerAttributes IAM permission |
+| `6492fe0` | `.github/workflows/deploy.yml`, `.github/workflows/terraform.yml` | Correct deploy summary URLs, default terraform env to dev on PR |
+| `577fb7e` | `terraform/alb-controller.tf`, `k8s/ingress.yaml` | Revert Copilot review suggestions that broke working config |
+| `a5fc0fb` | `.github/workflows/teardown.yml` | Safe teardown workflow with scope options and safety gate |
+| `9c4be1e` | `.github/workflows/terraform.yml` | Automate ALB controller Helm install as post-apply step |
+| `e87d2df` | `.github/workflows/teardown.yml` | Remove OIDC provider from teardown targets to preserve IRSA |
+| `0d0ac6a` | `.github/workflows/terraform.yml` | Gate ALB install to dev env, derive cluster name from kubeconfig |
+| `9ba54f3` | `terraform/transcribe.tf` | Add description to transcribe_lambda_role to match AWS |
+| `3e802da` | `.github/workflows/teardown.yml` | Handle stuck ingress finalizer with timeout + force-remove |
+| `bd4269c` | `terraform/transcribe.tf` | Remove reserved `AWS_REGION` env var from Lambda config |
+| `a26a02e` | `.github/workflows/terraform.yml` | Extract short cluster name from ARN for Helm install |
+| `36e1c7b` | `.github/workflows/deploy.yml` | Add DNS resolution wait before ALB smoke test |
+| `6ff4bcb` | All 5 workflow files | Move `AWS_REGION` from secrets to vars to prevent URL masking |
