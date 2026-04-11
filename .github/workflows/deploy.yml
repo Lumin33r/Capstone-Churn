@@ -9,11 +9,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'services/**'
-      - 'frontend/**'
-      - 'k8s/**'
-      - 'docker-compose.yml'
-      - '.github/workflows/deploy.yml'
+      - "services/**"
+      - "frontend/**"
+      - "k8s/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
     inputs:
       service:
@@ -113,6 +113,7 @@ jobs:
           kubectl apply -f k8s/configmaps/
           kubectl apply -f k8s/deployments/
           kubectl apply -f k8s/services/
+          kubectl apply -f k8s/ingress.yaml
 
       - name: Create secrets from GitHub secrets
         run: |
@@ -155,35 +156,35 @@ jobs:
 
       - name: Smoke test agent health
         run: |
-          AGENT_URL=$(kubectl get svc agent-service -n retention-engine \
-            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "Agent service URL: $AGENT_URL"
-          if [ -z "$AGENT_URL" ]; then
-            echo "⚠️ No load balancer hostname assigned — skipping smoke test"
-            echo "Check for TooManyLoadBalancers or pending LB provisioning"
-            kubectl get svc agent-service -n retention-engine
+          ALB_URL=$(kubectl get ingress retention-engine-ingress -n retention-engine \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+          echo "ALB URL: $ALB_URL"
+          if [ -z "$ALB_URL" ]; then
+            echo "⚠️ No ALB hostname assigned yet — skipping smoke test"
+            echo "The ALB may take 2-3 minutes to provision"
+            kubectl get ingress -n retention-engine
             exit 0
           fi
-          curl -sf --retry 5 --retry-delay 10 "http://${AGENT_URL}:8080/health"
-          echo "✅ Agent service is healthy"
+          curl -sf --retry 5 --retry-delay 10 "http://${ALB_URL}/health"
+          echo "✅ Agent service is healthy via ALB"
 
       - name: Deployment Summary
         run: |
+          ALB_URL=$(kubectl get ingress retention-engine-ingress -n retention-engine \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
           echo "## Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Service | Endpoint | Status |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|---------|----------|--------|" >> "$GITHUB_STEP_SUMMARY"
-          for svc in agent-service churn-predictor-service frontend-service; do
-            HOST=$(kubectl get svc "$svc" -n retention-engine \
-              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "N/A")
-            PORT=$(kubectl get svc "$svc" -n retention-engine \
-              -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo "N/A")
-            if [ "$HOST" != "N/A" ] && [ -n "$HOST" ]; then
-              echo "| $svc | http://${HOST}:${PORT} | ✅ |" >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "| $svc | ClusterIP only | ⚠️ |" >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done
+          if [ -n "$ALB_URL" ]; then
+            echo "### ALB Endpoint" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Route | URL |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|-------|-----|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Frontend | http://${ALB_URL}/ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| API | http://${ALB_URL}/api |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Health | http://${ALB_URL}/health |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ ALB not yet provisioned — check \`kubectl get ingress -n retention-engine\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Tag:** \`${{ inputs.tag }}\`  " >> "$GITHUB_STEP_SUMMARY"
           echo "**Service:** \`${{ inputs.service }}\`" >> "$GITHUB_STEP_SUMMARY"
