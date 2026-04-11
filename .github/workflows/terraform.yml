@@ -61,7 +61,7 @@ jobs:
         run: terraform validate
 
       - name: Terraform Plan
-        run: terraform plan -var="environment=${{ inputs.environment }}" -out=tfplan
+        run: terraform plan -var="environment=${{ inputs.environment || 'dev' }}" -out=tfplan
 
       - name: Terraform Apply
         if: inputs.action == 'apply'

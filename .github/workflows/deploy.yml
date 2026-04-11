@@ -180,7 +180,8 @@ jobs:
             echo "| Route | URL |" >> "$GITHUB_STEP_SUMMARY"
             echo "|-------|-----|" >> "$GITHUB_STEP_SUMMARY"
             echo "| Frontend | http://${ALB_URL}/ |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| API | http://${ALB_URL}/api |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Agent API | http://${ALB_URL}/agent-api/ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Churn API | http://${ALB_URL}/churn-api/ |" >> "$GITHUB_STEP_SUMMARY"
             echo "| Health | http://${ALB_URL}/health |" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "⚠️ ALB not yet provisioned — check \`kubectl get ingress -n retention-engine\`" >> "$GITHUB_STEP_SUMMARY"
