@@ -54,8 +54,8 @@ class RetentionState(TypedDict):
 tools = [get_customer_details, analyze_call, predict_churn, get_high_risk_customers]
 
 llm = ChatBedrock(
-    model=MODEL_ID,
-    region=AWS_REGION,
+    model_id=MODEL_ID,
+    region_name=AWS_REGION,
     model_kwargs={"max_tokens": 1024, "temperature": 0},
 )
 
