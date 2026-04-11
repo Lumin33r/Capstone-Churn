@@ -28,6 +28,11 @@ spec:
           image: ghcr.io/lumin33r/qa-evaluator:latest
           ports:
             - containerPort: 8000
+          env:
+            - name: SENTIMENT_ENDPOINT_NAME
+              value: "retention-sentiment-analysis-endpoint"
+            - name: AWS_REGION
+              value: "us-east-1"
           envFrom:
             - secretRef:
                 name: aws-secrets
