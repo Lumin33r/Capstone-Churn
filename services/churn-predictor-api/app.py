@@ -442,17 +442,27 @@ def get_transcript(filename: str):
 
         full_text = result["results"]["transcripts"][0]["transcript"]
 
-        # Extract speaker segments if available
+        # Build speaker segments from top-level items (which have both
+        # speaker_label and alternatives with text content)
         segments = []
-        if "speaker_labels" in result["results"]:
-            for seg in result["results"]["speaker_labels"]["segments"]:
-                speaker = seg["speaker_label"]
-                text = " ".join(
-                    item["alternatives"][0]["content"]
-                    for item in seg["items"]
-                    if item.get("alternatives")
-                )
-                segments.append({"speaker": speaker, "text": text})
+        items = result["results"].get("items", [])
+        if items and items[0].get("speaker_label"):
+            current_speaker = None
+            current_words = []
+            for item in items:
+                speaker = item.get("speaker_label", current_speaker)
+                word = item["alternatives"][0]["content"] if item.get("alternatives") else ""
+                if speaker != current_speaker and current_words:
+                    segments.append({"speaker": current_speaker, "text": " ".join(current_words)})
+                    current_words = []
+                current_speaker = speaker
+                if word:
+                    if item.get("type") == "punctuation" and current_words:
+                        current_words[-1] += word
+                    else:
+                        current_words.append(word)
+            if current_words:
+                segments.append({"speaker": current_speaker, "text": " ".join(current_words)})
 
         return {
             "filename": filename,
