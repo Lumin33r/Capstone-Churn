@@ -2,16 +2,23 @@
 # IAM resources for the AWS Load Balancer Controller (runs in EKS, creates ALBs from Ingress resources)
 # The controller uses IRSA (IAM Roles for Service Accounts) to assume this role.
 
+data "aws_eks_clusters" "available" {}
+
 locals {
-  oidc_provider_id  = "B1BA56AF27E5EF75212F0981437E30A4"
-  oidc_provider_url = "oidc.eks.${var.aws_region}.amazonaws.com/id/${local.oidc_provider_id}"
-  oidc_provider_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:oidc-provider/${local.oidc_provider_url}"
-  eks_cluster_name  = "eks-ezvrmopo-okl"
+  eks_cluster_name = one(data.aws_eks_clusters.available.names)
+}
+
+data "aws_eks_cluster" "selected" {
+  name = local.eks_cluster_name
+}
+
+locals {
+  oidc_provider_url = trimprefix(data.aws_eks_cluster.selected.identity[0].oidc[0].issuer, "https://")
 }
 
 # ── Register the EKS OIDC provider with IAM ──────────────────────────
 resource "aws_iam_openid_connect_provider" "eks" {
-  url             = "https://${local.oidc_provider_url}"
+  url             = data.aws_eks_cluster.selected.identity[0].oidc[0].issuer
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = ["9e99a48a9960b14926bb7f3b02e22da2b0ab7280"]
 
