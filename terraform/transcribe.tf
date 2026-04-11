@@ -70,7 +70,6 @@ resource "aws_lambda_function" "transcribe_pipeline" {
 
   environment {
     variables = {
-      AWS_REGION    = "us-east-1"
       OUTPUT_BUCKET = "retention-engine-bucket"
       OUTPUT_PREFIX = "transcripts"
     }
