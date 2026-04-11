@@ -8,8 +8,8 @@ name: 1 — Terraform Infrastructure
 on:
   pull_request:
     paths:
-      - 'terraform/**'
-      - '.github/workflows/terraform.yml'
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
   workflow_dispatch:
     inputs:
       action:

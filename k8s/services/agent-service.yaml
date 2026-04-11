@@ -1,6 +1,6 @@
 # k8s/services/agent-service.yaml
 # Exposes the agent container so the frontend can reach it
-# LoadBalancer type: AWS creates an external load balancer with a public URL
+# Exposed externally via Ingress (ALB)
 apiVersion: v1
 kind: Service
 metadata:
@@ -16,4 +16,4 @@ spec:
     - protocol: TCP
       port: 8080
       targetPort: 8080
-  type: LoadBalancer
+  type: ClusterIP

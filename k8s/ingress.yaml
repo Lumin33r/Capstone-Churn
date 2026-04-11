@@ -1,0 +1,55 @@
+# k8s/ingress.yaml
+# Single ALB routes all external traffic into the cluster
+# Requires: AWS Load Balancer Controller running in kube-system
+#
+# Routes:
+#   /           → frontend-service:3000
+#   /api/*      → agent-service:8080
+#   /health     → agent-service:8080
+
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+spec:
+  controller: ingress.k8s.aws/alb
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: retention-engine-ingress
+  namespace: retention-engine
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/subnets: subnet-0e7f68798fdc00dfe, subnet-047e643b05c5d7313
+    alb.ingress.kubernetes.io/tags: Team=retention-engine,Environment=staging
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: agent-service
+                port:
+                  number: 8080
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: agent-service
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 3000

@@ -9,8 +9,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'sagemaker/**'
-      - '.github/workflows/sagemaker-deploy.yml'
+      - "sagemaker/**"
+      - ".github/workflows/sagemaker-deploy.yml"
   workflow_dispatch:
     inputs:
       endpoint:
