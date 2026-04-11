@@ -47,7 +47,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -92,7 +92,7 @@ jobs:
           RAW_CLUSTER=$(kubectl config view --minify -o jsonpath='{.contexts[0].context.cluster}')
           # Strip ARN prefix if present (arn:aws:eks:region:acct:cluster/name → name)
           CLUSTER_NAME="${RAW_CLUSTER##*/}"
-          REGION="${{ secrets.AWS_REGION }}"
+          REGION="${{ vars.AWS_REGION }}"
           ROLE_ARN=$(terraform output -raw alb_controller_role_arn)
           echo "ALB Controller Role ARN: $ROLE_ARN"
 
