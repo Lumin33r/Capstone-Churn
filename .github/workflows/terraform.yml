@@ -73,23 +73,23 @@ jobs:
 
       # ── ALB Controller Helm Install (after apply) ─────────────────
       - name: Setup kubectl
-        if: inputs.action == 'apply'
+        if: inputs.action == 'apply' && inputs.environment == 'dev'
         uses: azure/setup-kubectl@v3
 
       - name: Setup Helm
-        if: inputs.action == 'apply'
+        if: inputs.action == 'apply' && inputs.environment == 'dev'
         uses: azure/setup-helm@v4
 
       - name: Write kubeconfig
-        if: inputs.action == 'apply'
+        if: inputs.action == 'apply' && inputs.environment == 'dev'
         run: |
           mkdir -p "$HOME/.kube"
           echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > "$HOME/.kube/config"
 
       - name: Install ALB Controller
-        if: inputs.action == 'apply'
+        if: inputs.action == 'apply' && inputs.environment == 'dev'
         run: |
-          CLUSTER_NAME="eks-ezvrmopo-okl"
+          CLUSTER_NAME=$(kubectl config view --minify -o jsonpath='{.contexts[0].context.cluster}')
           REGION="${{ secrets.AWS_REGION }}"
           ROLE_ARN=$(terraform output -raw alb_controller_role_arn)
           echo "ALB Controller Role ARN: $ROLE_ARN"
