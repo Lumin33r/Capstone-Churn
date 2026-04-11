@@ -9,11 +9,12 @@ import io
 import json
 import os
 import logging
+import time
 
 import boto3
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -378,5 +379,88 @@ def predict(req: PredictRequest):
 
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Transcribe Pipeline Routes ---
+transcribe_client = boto3.client("transcribe", region_name=REGION)
+
+
+@app.post("/transcribe")
+async def upload_audio(file: UploadFile = File(...)):
+    """Upload an audio file to S3 audio/ prefix.
+    The Lambda trigger will automatically start a Transcribe job."""
+    allowed_ext = {".wav", ".mp3", ".mp4", ".flac"}
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in allowed_ext:
+        raise HTTPException(status_code=400, detail=f"Unsupported format: {ext}. Use: {', '.join(allowed_ext)}")
+
+    s3_key = f"audio/{file.filename}"
+    logger.info(f"Uploading audio: {s3_key}")
+
+    contents = await file.read()
+    s3.put_object(Bucket=S3_BUCKET, Key=s3_key, Body=contents)
+
+    return {
+        "status": "uploaded",
+        "s3_key": s3_key,
+        "filename": file.filename,
+        "message": "Transcription job will start automatically via Lambda trigger.",
+    }
+
+
+@app.get("/transcripts")
+def list_transcripts():
+    """List all completed transcripts in S3 transcripts/ prefix."""
+    try:
+        resp = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix="transcripts/")
+        transcripts = []
+        for obj in resp.get("Contents", []):
+            key = obj["Key"]
+            if key.endswith(".json"):
+                name = os.path.basename(key).replace(".json", "")
+                transcripts.append({
+                    "name": name,
+                    "key": key,
+                    "size": obj["Size"],
+                    "last_modified": obj["LastModified"].isoformat(),
+                })
+        transcripts.sort(key=lambda x: x["last_modified"], reverse=True)
+        return transcripts
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/transcripts/{filename}")
+def get_transcript(filename: str):
+    """Retrieve a specific transcript and return the text + speaker segments."""
+    s3_key = f"transcripts/{filename}.json"
+    try:
+        obj = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
+        result = json.loads(obj["Body"].read().decode())
+
+        full_text = result["results"]["transcripts"][0]["transcript"]
+
+        # Extract speaker segments if available
+        segments = []
+        if "speaker_labels" in result["results"]:
+            for seg in result["results"]["speaker_labels"]["segments"]:
+                speaker = seg["speaker_label"]
+                text = " ".join(
+                    item["alternatives"][0]["content"]
+                    for item in seg["items"]
+                    if item.get("alternatives")
+                )
+                segments.append({"speaker": speaker, "text": text})
+
+        return {
+            "filename": filename,
+            "transcript": full_text,
+            "segments": segments,
+            "job_name": result.get("jobName", ""),
+        }
+    except s3.exceptions.NoSuchKey:
+        raise HTTPException(status_code=404, detail=f"Transcript '{filename}' not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

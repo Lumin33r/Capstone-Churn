@@ -470,7 +470,12 @@ Presentation Day                   ███████████████
 
 ### Bonus Integrations (Anyone)
 
-- [ ] Amazon Transcribe pipeline: S3 audio → Transcribe → feed to agent
+- [x] Amazon Transcribe pipeline: S3 audio → Transcribe → feed to agent
+  - Lambda function: `services/transcribe-pipeline/lambda_function.py`
+  - Terraform: `terraform/transcribe.tf` (Lambda, IAM role, S3 event trigger)
+  - Flow: S3 `audio/` upload → Lambda → Transcribe (speaker diarization) → S3 `transcripts/`
+  - Supports: .wav, .mp3, .mp4 audio formats
+  - Test script: `services/transcribe-pipeline/test_local.py`
 - [ ] Amazon Polly: text-to-speech for agent responses
 - [ ] Model drift tracking — lightweight `/drift` endpoint in churn predictor:
   - Log prediction distributions over time (rolling window)
@@ -570,7 +575,7 @@ Week 2 Focus:       Frontend     Frontend             Frontend
 | Presentation  | Present early                                       | Low        | All            | Pending                                                          |
 | LLM Usage     | Compare LLM vs hand-written code                    | Medium     | Kathleen       | ✅ In llm-usage doc                                              |
 | LLM Usage     | Document prompt engineering techniques              | Low        | Kathleen       | ✅ In llm-usage doc                                              |
-| Extra         | AWS Transcribe/Polly integration                    | Medium     | Anyone         | Pending                                                          |
+| Extra         | AWS Transcribe pipeline (Lambda + S3 trigger)       | Medium     | Kathleen       | ✅ Done — terraform/transcribe.tf + Lambda function              |
 | Extra         | Blog articles, MkDocs, video series                 | High       | Anyone         | Pending                                                          |
 | Extra         | Portfolio page integration                          | High       | Anyone         | Pending                                                          |
 
