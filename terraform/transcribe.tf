@@ -4,8 +4,9 @@
 
 # --- IAM Role for the Lambda function ---
 resource "aws_iam_role" "transcribe_lambda_role" {
-  name = "retention-transcribe-lambda-role"
-  path = "/retention/"
+  name        = "retention-transcribe-lambda-role"
+  description = "Lambda role for Transcribe pipeline"
+  path        = "/retention/"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
