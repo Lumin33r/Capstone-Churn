@@ -3,10 +3,9 @@
 # PRESERVES: EKS cluster, SageMaker endpoints, S3 bucket, sagemaker-execution-role
 #
 # After teardown, rebuild in order:
-#   1. terraform.yml  → apply (IAM roles, ALB controller IAM, transcribe Lambda)
-#   2. scripts/install-alb-controller.sh (manual — Helm install)
-#   3. sagemaker-deploy.yml → deploy both (no-op if endpoints exist)
-#   4. deploy.yml → all (build images, apply K8s, restart pods)
+#   1. terraform.yml  → apply (IAM roles, ALB controller IAM + Helm install, transcribe Lambda)
+#   2. sagemaker-deploy.yml → deploy both (no-op if endpoints exist)
+#   3. deploy.yml → all (build images, apply K8s, restart pods)
 
 name: 0 — Safe Teardown
 
@@ -158,7 +157,6 @@ jobs:
           echo "| IAM role \`sagemaker-execution-role\` | Used by running endpoints |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### 🔄 Rebuild Order" >> "$GITHUB_STEP_SUMMARY"
-          echo "1. **Terraform** → \`workflow_dispatch\` → action: \`apply\`, env: \`dev\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "2. **ALB Controller** → run \`scripts/install-alb-controller.sh\` locally" >> "$GITHUB_STEP_SUMMARY"
-          echo "3. **SageMaker** → \`workflow_dispatch\` → endpoint: \`both\`, action: \`deploy\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "4. **Deploy** → \`workflow_dispatch\` → service: \`all\`, tag: \`latest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "1. **Terraform** → \`workflow_dispatch\` → action: \`apply\`, env: \`dev\` (includes ALB controller Helm install)" >> "$GITHUB_STEP_SUMMARY"
+          echo "2. **SageMaker** → \`workflow_dispatch\` → endpoint: \`both\`, action: \`deploy\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "3. **Deploy** → \`workflow_dispatch\` → service: \`all\`, tag: \`latest\`" >> "$GITHUB_STEP_SUMMARY"
