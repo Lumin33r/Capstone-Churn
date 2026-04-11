@@ -595,14 +595,14 @@ RuntimeError: Model /opt/ml/model/feature_columns.json cannot be loaded
 
 ## Running List of Changes (This Session — April 9, 2026)
 
-| Commit    | File(s)                                                                 | Change                                                                                        |
-| --------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `72079ee` | multiple                                                                | Merged `origin/main` into `troy/test-workflows` (PRs #52, #53, #55)                           |
-| `5da84ed` | `terraform/providers.tf`                                                | Removed duplicate S3 backend block (kept in `backend.tf`)                                     |
-| `cf63e10` | `terraform/sagemaker.tf`, `terraform/variables.tf`                      | Removed all SageMaker model/endpoint/config resources; managed by `sagemaker-deploy.yml`      |
-| `8bf16b2` | `.github/workflows/deploy.yml`                                          | Added Deployment Summary step with service URLs table via `$GITHUB_STEP_SUMMARY`              |
-| `d2d26d7` | `k8s/secrets.yaml`                                                      | Fixed `kind: Secrets` → `kind: Secret` (singular)                                             |
-| `3cd6c35` | `.github/workflows/terraform.yml`, `sagemaker-deploy.yml`, `deploy.yml` | Numbered workflow names: 1 — Terraform, 2 — SageMaker, 3 — Build & Roll Out                   |
-| `2a21d56` | `.github/workflows/deploy.yml`                                          | Replaced `kubectl apply -f k8s/secrets.yaml` with `kubectl create secret` from GitHub secrets |
-| `70c2dcb` | `.github/workflows/deploy.yml`                                          | Added `kubectl delete kube-secrets --ignore-not-found` before recreate to handle type change  |
-| `9bea5b6` | `k8s/deployments/backend-deployment.yaml`, `churn-wrapper-deployment.yaml`, `transcript-wrapper-deployment.yaml` | Removed deployment manifests for services with no Docker images |
+| Commit    | File(s)                                                                                                          | Change                                                                                        |
+| --------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `72079ee` | multiple                                                                                                         | Merged `origin/main` into `troy/test-workflows` (PRs #52, #53, #55)                           |
+| `5da84ed` | `terraform/providers.tf`                                                                                         | Removed duplicate S3 backend block (kept in `backend.tf`)                                     |
+| `cf63e10` | `terraform/sagemaker.tf`, `terraform/variables.tf`                                                               | Removed all SageMaker model/endpoint/config resources; managed by `sagemaker-deploy.yml`      |
+| `8bf16b2` | `.github/workflows/deploy.yml`                                                                                   | Added Deployment Summary step with service URLs table via `$GITHUB_STEP_SUMMARY`              |
+| `d2d26d7` | `k8s/secrets.yaml`                                                                                               | Fixed `kind: Secrets` → `kind: Secret` (singular)                                             |
+| `3cd6c35` | `.github/workflows/terraform.yml`, `sagemaker-deploy.yml`, `deploy.yml`                                          | Numbered workflow names: 1 — Terraform, 2 — SageMaker, 3 — Build & Roll Out                   |
+| `2a21d56` | `.github/workflows/deploy.yml`                                                                                   | Replaced `kubectl apply -f k8s/secrets.yaml` with `kubectl create secret` from GitHub secrets |
+| `70c2dcb` | `.github/workflows/deploy.yml`                                                                                   | Added `kubectl delete kube-secrets --ignore-not-found` before recreate to handle type change  |
+| `9bea5b6` | `k8s/deployments/backend-deployment.yaml`, `churn-wrapper-deployment.yaml`, `transcript-wrapper-deployment.yaml` | Removed deployment manifests for services with no Docker images                               |
