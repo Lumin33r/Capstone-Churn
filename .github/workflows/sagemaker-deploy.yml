@@ -6,6 +6,11 @@
 name: 2 — SageMaker Endpoints
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'sagemaker/**'
+      - '.github/workflows/sagemaker-deploy.yml'
   workflow_dispatch:
     inputs:
       endpoint:

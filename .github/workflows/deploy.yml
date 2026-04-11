@@ -6,6 +6,14 @@
 name: 3 — Build & Roll Out to EKS
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'frontend/**'
+      - 'k8s/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
       service:
