@@ -89,7 +89,9 @@ jobs:
       - name: Install ALB Controller
         if: inputs.action == 'apply' && inputs.environment == 'dev'
         run: |
-          CLUSTER_NAME=$(kubectl config view --minify -o jsonpath='{.contexts[0].context.cluster}')
+          RAW_CLUSTER=$(kubectl config view --minify -o jsonpath='{.contexts[0].context.cluster}')
+          # Strip ARN prefix if present (arn:aws:eks:region:acct:cluster/name → name)
+          CLUSTER_NAME="${RAW_CLUSTER##*/}"
           REGION="${{ secrets.AWS_REGION }}"
           ROLE_ARN=$(terraform output -raw alb_controller_role_arn)
           echo "ALB Controller Role ARN: $ROLE_ARN"
