@@ -3,7 +3,7 @@
 # Run this FIRST before any other deploy workflow
 # See: CAPSTONE/docs/cicd-terraform.md
 
-name: Terraform — Infrastructure
+name: 1 — Terraform Infrastructure
 
 on:
   workflow_dispatch:

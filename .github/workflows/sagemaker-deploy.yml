@@ -3,7 +3,7 @@
 # Run AFTER terraform.yml has provisioned IAM roles and S3
 # See: CAPSTONE/docs/cicd-sagemaker-deploy.md
 
-name: SageMaker — Deploy Endpoints
+name: 2 — SageMaker Endpoints
 
 on:
   workflow_dispatch:
@@ -48,7 +48,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install boto3 python-dotenv
+        run: pip install boto3 python-dotenv packaging
 
       # ── Deploy Churn Endpoint ───────────────────────────────────────
       - name: Deploy Churn Endpoint
@@ -99,7 +99,7 @@ jobs:
       - name: Wait for Sentiment Endpoint
         if: inputs.action == 'deploy' && (inputs.endpoint == 'both' || inputs.endpoint == 'sentiment')
         run: |
-          ENDPOINT_NAME="sentiment-analysis-endpoint"
+          ENDPOINT_NAME="retention-sentiment-analysis-endpoint"
           for i in $(seq 1 30); do
             STATUS=$(aws sagemaker describe-endpoint \
               --endpoint-name "$ENDPOINT_NAME" \
@@ -115,21 +115,21 @@ jobs:
       - name: Validate Churn Inference
         if: inputs.action == 'deploy' && (inputs.endpoint == 'both' || inputs.endpoint == 'churn')
         run: |
-          PAYLOAD="2,100,78.0,150.5,5,2,3,1,450,0.65,35,75000,2,3,1,1,1,1,2,1800,350000,0.15,65000,1,5.0,1,0.3,0.1,0.0,0,1"
-          RESPONSE=$(aws sagemaker-runtime invoke-endpoint \
+          echo -n "2,100,78.0,150.5,5,2,3,1,450,0.65,35,75000,2,3,1,1,1,1,2,1800,350000,0.15,65000,1,5.0,1,0.3,0.1,0.0,0,1" > /tmp/churn-payload.csv
+          aws sagemaker-runtime invoke-endpoint \
             --endpoint-name churn-predictor-endpoint \
             --content-type text/csv \
-            --body "$PAYLOAD" \
-            /dev/stdout 2>/dev/null)
-          echo "✅ Churn endpoint response: $RESPONSE"
+            --body fileb:///tmp/churn-payload.csv \
+            /tmp/churn-response.json
+          echo "✅ Churn endpoint response: $(cat /tmp/churn-response.json)"
 
       - name: Validate Sentiment Inference
         if: inputs.action == 'deploy' && (inputs.endpoint == 'both' || inputs.endpoint == 'sentiment')
         run: |
-          PAYLOAD='{"inputs": "The customer expressed frustration about repeated billing errors."}'
-          RESPONSE=$(aws sagemaker-runtime invoke-endpoint \
-            --endpoint-name sentiment-analysis-endpoint \
+          echo -n '{"inputs": "The customer expressed frustration about repeated billing errors."}' > /tmp/sentiment-payload.json
+          aws sagemaker-runtime invoke-endpoint \
+            --endpoint-name retention-sentiment-analysis-endpoint \
             --content-type application/json \
-            --body "$PAYLOAD" \
-            /dev/stdout 2>/dev/null)
-          echo "✅ Sentiment endpoint response: $RESPONSE"
+            --body fileb:///tmp/sentiment-payload.json \
+            /tmp/sentiment-response.json
+          echo "✅ Sentiment endpoint response: $(cat /tmp/sentiment-response.json)"

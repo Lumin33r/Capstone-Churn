@@ -47,18 +47,12 @@ variable "agent_model" {
   }
 }
 
-variable "sentiment_endpoint_name" {
-  description = "Name of the SageMaker endpoint for sentiment analysis"
-  type        = string
-  default     = "sentiment-analysis-endpoint"
-}
-
 variable "agent_instruction" {
   description = "The system prompt for the Bedrock agent. Defines its behavior and persona required for downstream churn analysis."
   type        = string
   default     = <<-EOT
     You are a Sentiment Analyst. Analyze customer transcripts to determine sentiment (Positive, Negative, Neutral) and category.
-    Constraints: 
+    Constraints:
       Analysis Scope: Do not invent customer details. Only analyze the text provided.
       Sentiment Scale: Categorize sentiment strictly as "Positive", "Negative", or "Neutral"
     Output: Provide a strict JSON object containing sentiment, category, confidence_score, and char_count.

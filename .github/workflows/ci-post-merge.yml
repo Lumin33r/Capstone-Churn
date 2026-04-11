@@ -128,7 +128,7 @@ jobs:
       - name: Check sentiment endpoint
         run: |
           STATUS=$(aws sagemaker describe-endpoint \
-            --endpoint-name sentiment-analysis-endpoint \
+            --endpoint-name retention-sentiment-analysis-endpoint \
             --query 'EndpointStatus' --output text)
           echo "Sentiment endpoint: $STATUS"
           [ "$STATUS" = "InService" ] || exit 1
@@ -148,7 +148,7 @@ jobs:
         run: |
           PAYLOAD='{"inputs": "Customer is frustrated about repeated outages."}'
           aws sagemaker-runtime invoke-endpoint \
-            --endpoint-name sentiment-analysis-endpoint \
+            --endpoint-name retention-sentiment-analysis-endpoint \
             --content-type application/json \
             --body "$PAYLOAD" \
             /tmp/sentiment-out.json
