@@ -32,58 +32,6 @@ GUARDRAIL_NAME = os.getenv(key="GUARDRAIL_NAME", default="sentiment-analysis-gua
 sagemaker_runtime = boto3.client("sagemaker-runtime", region_name=AWS_REGION)
 
 
-# Data Models
-class EmotionScores(BaseModel):
-    anger: float = 0.71
-    sadness: float = 0.33
-    frustration: float = 0.82
-    fear: float = 0.12
-    disgust: float = 0.18
-    joy: float = 0.05
-    surprise: float = 0.09
-    confusion: float = 0.41
-    neutral: float = 0.22
-
-
-class CallRecord(BaseModel):
-    call_id: str = "CALL_000001"
-    customer_id: str = "C00008949"
-    primary_scenario: str = "contract_renewal"
-    qa_score: float = 3.2
-    sentiment: str = "Negative"
-    category: str = "payment_assistance"
-    confidence: float = 0.91
-    frustration_level: int = 8
-    call_duration_indicator: str = "long"
-    escalation_flag: bool = True
-    customer_age: int = 16
-    income_bracket: str = "low"
-    plan_type: str = "Limited_10GB"
-    recent_overages_count: int = 6
-    customer_service_count: int = 1
-    customer_issue_history: int = 6
-    call_duration_seconds: int = 585
-    num_turns: int = 32
-    customer_talk_ratio: float = 0.58
-    agent_talk_ratio: float = 0.42
-    interruptions_count: int = 3
-    sentiment_shift: float = -0.42
-    word_count: int = 1240
-    avg_word_length: float = 4.7
-    num_negative_words: int = 18
-    num_positive_words: int = 4
-    num_exclamation_marks: int = 3
-    toxicity_score: float = 0.12
-    emotion_scores: EmotionScores = EmotionScores()
-    billing_dispute_flag: bool = False
-    outage_history_flag: bool = False
-    overage_amount_last_cycle: int = 20
-    agent_experience: float = 0.6
-    transfer_count: int = 0
-    resolution_flag: bool = False
-
-
-
 # File Loaders
 def load_model_files() -> dict[str, Any]:
     """Load model metadata files dynamically at request time."""
@@ -105,9 +53,7 @@ def load_notebook() -> Any:
         return json.load(fp=f)
 
 
-
 # Prompt Builder
-
 def build_prompt(results: dict, example: dict, notebook: dict, user_input: str) -> str:
     return f"""
 AGENT INSTRUCTIONS: TRANSCRIPT SENTIMENT ANALYZER
@@ -202,6 +148,57 @@ def invoke_sagemaker(prompt: str, transcript: str) -> dict[str, Any]:
 
     return json.loads(s=response["Body"].read().decode())
 
+# Data Models
+class EmotionScores(BaseModel):
+    anger: float = 0.71
+    sadness: float = 0.33
+    frustration: float = 0.82
+    fear: float = 0.12
+    disgust: float = 0.18
+    joy: float = 0.05
+    surprise: float = 0.09
+    confusion: float = 0.41
+    neutral: float = 0.22
+
+
+
+
+class CallRecord(BaseModel):
+    call_id: str = "CALL_000001"
+    customer_id: str = "C00008949"
+    primary_scenario: str = "contract_renewal"
+    qa_score: float = 3.2
+    sentiment: str = "Negative"
+    category: str = "payment_assistance"
+    confidence: float = 0.91
+    frustration_level: int = 8
+    call_duration_indicator: str = "long"
+    escalation_flag: bool = True
+    customer_age: int = 16
+    income_bracket: str = "low"
+    plan_type: str = "Limited_10GB"
+    recent_overages_count: int = 6
+    customer_service_count: int = 1
+    customer_issue_history: int = 6
+    call_duration_seconds: int = 585
+    num_turns: int = 32
+    customer_talk_ratio: float = 0.58
+    agent_talk_ratio: float = 0.42
+    interruptions_count: int = 3
+    sentiment_shift: float = -0.42
+    word_count: int = 1240
+    avg_word_length: float = 4.7
+    num_negative_words: int = 18
+    num_positive_words: int = 4
+    num_exclamation_marks: int = 3
+    toxicity_score: float = 0.12
+    emotion_scores: EmotionScores = EmotionScores()
+    billing_dispute_flag: bool = False
+    outage_history_flag: bool = False
+    overage_amount_last_cycle: int = 20
+    agent_experience: float = 0.6
+    transfer_count: int = 0
+    resolution_flag: bool = False
 
 
 # API Endpoints
