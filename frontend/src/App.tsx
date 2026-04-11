@@ -680,20 +680,28 @@ function TranscribeTab() {
             {/* Speaker segments */}
             {selectedTranscript.segments.length > 0 ? (
               <div className="space-y-3 max-h-[calc(100vh-300px)] overflow-y-auto">
-                {selectedTranscript.segments.map((seg, i) => (
-                  <div key={i} className={`flex ${seg.speaker === "spk_0" ? "justify-start" : "justify-end"}`}>
-                    <div className={`max-w-[80%] rounded-xl px-4 py-3 ${
-                      seg.speaker === "spk_0"
-                        ? "bg-blue-50 text-blue-900 rounded-bl-sm"
-                        : "bg-gray-100 text-gray-800 rounded-br-sm"
-                    }`}>
-                      <span className="text-xs font-semibold block mb-1">
-                        {seg.speaker === "spk_0" ? "Agent" : "Customer"}
-                      </span>
-                      <p className="text-sm">{seg.text}</p>
+                {(() => {
+                  const uniqueSpeakers = new Set(selectedTranscript.segments.map(s => s.speaker));
+                  const hasTwoSpeakers = uniqueSpeakers.size >= 2;
+                  const speakerLabel = (spk: string) =>
+                    hasTwoSpeakers
+                      ? spk === "spk_0" ? "Agent" : "Customer"
+                      : "Speaker";
+                  return selectedTranscript.segments.map((seg, i) => (
+                    <div key={i} className={`flex ${hasTwoSpeakers && seg.speaker !== "spk_0" ? "justify-end" : "justify-start"}`}>
+                      <div className={`max-w-[80%] rounded-xl px-4 py-3 ${
+                        hasTwoSpeakers && seg.speaker !== "spk_0"
+                          ? "bg-gray-100 text-gray-800 rounded-br-sm"
+                          : "bg-blue-50 text-blue-900 rounded-bl-sm"
+                      }`}>
+                        <span className="text-xs font-semibold block mb-1">
+                          {speakerLabel(seg.speaker)}
+                        </span>
+                        <p className="text-sm">{seg.text}</p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ));
+                })()}
               </div>
             ) : (
               /* Full transcript fallback */
