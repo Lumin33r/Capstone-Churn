@@ -75,31 +75,45 @@ jobs:
       - name: Delete Ingress (triggers ALB cleanup)
         if: inputs.scope == 'all' || inputs.scope == 'kubernetes'
         run: |
-          echo "Capturing ALB details from Ingress before deletion..."
+          if ! kubectl get ingress retention-engine-ingress -n retention-engine &>/dev/null; then
+            echo "⚠️ Ingress not found — skipping"
+            exit 0
+          fi
+
+          # Capture ALB name before deletion for AWS-side polling
           ALB_HOSTNAME=$(kubectl get ingress retention-engine-ingress -n retention-engine \
             -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
           ALB_NAME=""
           if [ -n "$ALB_HOSTNAME" ]; then
             ALB_NAME="${ALB_HOSTNAME%%.*}"
-            echo "Found ALB hostname: $ALB_HOSTNAME"
-            echo "Derived ALB name: $ALB_NAME"
-          else
-            echo "⚠️ No ALB hostname found on Ingress before deletion"
+            echo "Found ALB: $ALB_HOSTNAME"
           fi
 
           echo "Deleting Ingress — ALB controller will remove the ALB..."
-          kubectl delete ingress retention-engine-ingress -n retention-engine --ignore-not-found
+          kubectl delete ingress retention-engine-ingress -n retention-engine --timeout=120s || true
 
-          echo "Waiting for Ingress resource to be deleted from Kubernetes..."
-          kubectl wait --for=delete ingress/retention-engine-ingress -n retention-engine --timeout=120s 2>/dev/null || true
+          # If stuck on finalizer after timeout, force-remove it
+          if kubectl get ingress retention-engine-ingress -n retention-engine &>/dev/null; then
+            echo "⚠️ Ingress stuck on finalizer — removing finalizer..."
+            kubectl patch ingress retention-engine-ingress -n retention-engine \
+              --type=json -p='[{"op": "remove", "path": "/metadata/finalizers"}]' || true
+            sleep 5
+          fi
 
+          if kubectl get ingress retention-engine-ingress -n retention-engine &>/dev/null; then
+            echo "⚠️ Ingress still exists — continuing anyway"
+          else
+            echo "✅ Ingress deleted from Kubernetes"
+          fi
+
+          # Wait for ALB to be deprovisioned in AWS
           if [ -z "$ALB_NAME" ]; then
-            echo "⚠️ Skipping ALB polling because no ALB name could be determined"
+            echo "⚠️ No ALB name — skipping AWS polling"
           else
             echo "Waiting for ALB to be deprovisioned in AWS..."
             for i in $(seq 1 12); do
               if ! aws elbv2 describe-load-balancers --names "$ALB_NAME" >/dev/null 2>&1; then
-                echo "✅ ALB cleaned up"
+                echo "✅ ALB cleaned up in AWS"
                 break
               fi
               echo "  [$i/12] ALB still exists — waiting 10s..."
