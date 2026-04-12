@@ -115,7 +115,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Check churn endpoint
         run: |
@@ -128,7 +128,7 @@ jobs:
       - name: Check sentiment endpoint
         run: |
           STATUS=$(aws sagemaker describe-endpoint \
-            --endpoint-name sentiment-analysis-endpoint \
+            --endpoint-name retention-sentiment-analysis-endpoint \
             --query 'EndpointStatus' --output text)
           echo "Sentiment endpoint: $STATUS"
           [ "$STATUS" = "InService" ] || exit 1
@@ -148,7 +148,7 @@ jobs:
         run: |
           PAYLOAD='{"inputs": "Customer is frustrated about repeated outages."}'
           aws sagemaker-runtime invoke-endpoint \
-            --endpoint-name sentiment-analysis-endpoint \
+            --endpoint-name retention-sentiment-analysis-endpoint \
             --content-type application/json \
             --body "$PAYLOAD" \
             /tmp/sentiment-out.json
@@ -167,13 +167,13 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Create .env
         run: |
           echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
           echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
-          echo "AWS_REGION=${{ secrets.AWS_REGION }}" >> .env
+          echo "AWS_REGION=${{ vars.AWS_REGION }}" >> .env
           echo "LANGCHAIN_TRACING_V2=false" >> .env
 
       - name: Start services

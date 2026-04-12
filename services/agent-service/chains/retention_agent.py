@@ -97,8 +97,8 @@ def get_session_history(session_id: str) -> InMemoryChatMessageHistory:
 def create_retention_agent() -> RunnableWithMessageHistory:
     """Creates the agent with conversation memory."""
     llm = ChatBedrock(
-        model=MODEL_ID,
-        region=AWS_REGION,
+        model_id=MODEL_ID,
+        region_name=AWS_REGION,
         model_kwargs={"max_tokens": 1024, "temperature": 0},
     )
 

@@ -12,3 +12,5 @@ data:
   CHURN_PREDICTOR_URL: "http://churn-predictor-service:8001"
   LOG_LEVEL: "INFO"
   MODEL_ID: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  LANGCHAIN_TRACING_V2: "true"
+  LANGCHAIN_PROJECT: "retention-engine"

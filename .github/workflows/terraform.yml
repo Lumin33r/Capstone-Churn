@@ -3,9 +3,13 @@
 # Run this FIRST before any other deploy workflow
 # See: CAPSTONE/docs/cicd-terraform.md
 
-name: Terraform — Infrastructure
+name: 1 — Terraform Infrastructure
 
 on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform.yml"
   workflow_dispatch:
     inputs:
       action:
@@ -43,7 +47,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -57,7 +61,7 @@ jobs:
         run: terraform validate
 
       - name: Terraform Plan
-        run: terraform plan -var="environment=${{ inputs.environment }}" -out=tfplan
+        run: terraform plan -var="environment=${{ inputs.environment || 'dev' }}" -out=tfplan
 
       - name: Terraform Apply
         if: inputs.action == 'apply'
@@ -66,3 +70,48 @@ jobs:
       - name: Print Outputs
         if: inputs.action == 'apply'
         run: terraform output
+
+      # ── ALB Controller Helm Install (after apply) ─────────────────
+      - name: Setup kubectl
+        if: inputs.action == 'apply' && inputs.environment == 'dev'
+        uses: azure/setup-kubectl@v3
+
+      - name: Setup Helm
+        if: inputs.action == 'apply' && inputs.environment == 'dev'
+        uses: azure/setup-helm@v4
+
+      - name: Write kubeconfig
+        if: inputs.action == 'apply' && inputs.environment == 'dev'
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > "$HOME/.kube/config"
+
+      - name: Install ALB Controller
+        if: inputs.action == 'apply' && inputs.environment == 'dev'
+        run: |
+          RAW_CLUSTER=$(kubectl config view --minify -o jsonpath='{.contexts[0].context.cluster}')
+          # Strip ARN prefix if present (arn:aws:eks:region:acct:cluster/name → name)
+          CLUSTER_NAME="${RAW_CLUSTER##*/}"
+          REGION="${{ vars.AWS_REGION }}"
+          ROLE_ARN=$(terraform output -raw alb_controller_role_arn)
+          echo "ALB Controller Role ARN: $ROLE_ARN"
+
+          helm repo add eks https://aws.github.io/eks-charts
+          helm repo update
+
+          VPC_ID=$(aws eks describe-cluster --name "$CLUSTER_NAME" \
+            --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+            --namespace kube-system \
+            --set clusterName="$CLUSTER_NAME" \
+            --set region="$REGION" \
+            --set vpcId="$VPC_ID" \
+            --set serviceAccount.create=true \
+            --set serviceAccount.name=aws-load-balancer-controller \
+            --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"="$ROLE_ARN"
+
+          echo "Waiting for controller to be ready..."
+          kubectl rollout status deployment/aws-load-balancer-controller \
+            -n kube-system --timeout=120s
+          echo "✅ ALB Controller installed"

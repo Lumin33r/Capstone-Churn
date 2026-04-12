@@ -43,7 +43,7 @@ ENDPOINT_NAME = "retention-sentiment-analysis-endpoint"
 MODEL_NAME = "retention-sentiment-analysis-model"
 ENDPOINT_CONFIG_NAME = "retention-sentiment-analysis-config"
 EXECUTION_ROLE_NAME = os.getenv(
-    key="EXECUTION_ROLE_NAME", 
+    key="EXECUTION_ROLE_NAME",
     default="retention-sagemaker-execution-role"
 )
 # Free Instance
@@ -72,16 +72,16 @@ def shutdown_threads() -> None:
         concurrent.futures.thread._shutdown
     except:
         pass
-    
 
-# Container priority 
+
+# Container priority
 CONTAINER_CANDIDATES = [
     # Hugging Faces (model is trained on distilbert)
     {
         "name": "huggingfaces",
         "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:2.6.0-transformers4.49.0-cpu-py312-ubuntu22.04"
     },
-    # New Version of Hugging Faces 
+    # New Version of Hugging Faces
     {
         "name": "huggingfaces-new",
         "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:2.6.0-transformers4.49.0-cpu-py312-ubuntu22.04"
@@ -136,7 +136,7 @@ def validate_model_artifacts() -> None:
         if not os.path.isfile(path=path):
             # raise FileNotFoundError(f"Required file missing: {path}")
             pass
-            
+
     # Block HF training artifacts that confuse framework containers
     forbidden_patterns = [
         "checkpoint",
@@ -160,7 +160,7 @@ def validate_model_artifacts() -> None:
     print("Model artifacts validation passed.")
 
 
-    
+
 def package_model(tar_path: str) -> str:
     """Package model artifacts into a tar.gz for SageMaker."""
     validate_model_artifacts()
@@ -189,9 +189,9 @@ def package_model(tar_path: str) -> str:
                     tr.add(name=filepath, arcname=os.path.basename(p=filepath))
 
                 tr.add(name=filepath, arcname=os.path.basename(p=filepath))
-    
+
     print(f"  Created {tar_path}")
-    
+
     shutil.rmtree(f"{SCRIPT_DIR}/exported_model")
     print("Local folder deleted.")
 
@@ -316,6 +316,7 @@ def select_best_container() -> str:
 def create_endpoint(s3_uri: str) -> None:
     """Create SageMaker model, endpoint config, and endpoint."""
     sm = boto3.client("sagemaker", region_name=REGION)
+
     role_arn = get_iam_role()
     image_uri = select_best_container()
 
@@ -460,7 +461,7 @@ def test_endpoint() -> None:
         ContentType="application/json",
         Body=json.dumps(obj=test_payload),
     )
-    
+
     try:
         result = json.loads(s=response["Body"].read().decode())
     except json.JSONDecodeError:
