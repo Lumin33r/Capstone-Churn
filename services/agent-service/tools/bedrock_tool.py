@@ -1,10 +1,37 @@
 
 import os
 import httpx
+import boto3
 from langchain.tools import tool
-from bedrock_guardrail import get_guardrail_info
+from dotenv import load_dotenv
+from typing import Any
 
+
+load_dotenv()
+
+
+GUARDRAIL_NAME = os.getenv(key="GUARDRAIL_NAME", default="sentiment-analysis-guardrail")
 BEDROCK_URL = os.getenv(key="BEDROCK_URL", default="http://localhost:8001")
+AWS_REGION = os.getenv(key="AWS_REGION", default="us-east-1")
+
+
+# Guardrail Logic
+def get_guardrail_info() -> dict[str, Any]:
+    bedrock = boto3.client("bedrock", region_name=AWS_REGION)
+    response = bedrock.list_guardrails()
+
+
+    for item in response.get("guardrails", []):
+        if item.get("name") == GUARDRAIL_NAME:
+            return {
+                "guardrail_id": item["id"],
+                "guardrail_version": item["version"],
+                "status": item["status"],
+                "description": item["description"],
+            }
+
+    raise ValueError(f"Guardrail '{GUARDRAIL_NAME}' not found.")
+
 
 @tool
 def bedrock_chat(prompt: str) -> str:
@@ -13,12 +40,12 @@ def bedrock_chat(prompt: str) -> str:
     Use this tool for open-ended conversation, rewriting, summarization,
     or general reasoning tasks.
     """
-    guardrail_id, guardrail_version = get_guardrail_info()
+    guardrail_info = get_guardrail_info()
 
     payload = {
         "input": prompt,
-        "guardrail_id": guardrail_id,
-        "guardrail_version": guardrail_version,
+        "guardrail_id": guardrail_info.guardrail_id,
+        "guardrail_version": guardrail_info.guardrail_version,
     }
 
     try:
