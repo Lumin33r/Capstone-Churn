@@ -1,3 +1,6 @@
 transformers==4.49.0
 tokenizers
 safetensors
+vaderSentiment
+numpy
+torch
