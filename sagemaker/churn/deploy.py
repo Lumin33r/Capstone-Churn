@@ -225,6 +225,26 @@ if __name__ == "__main__":
     elif args.test:
         test_endpoint()
     else:
+        # Skip everything if endpoint is already healthy or in-progress
+        sm = boto3.client("sagemaker", region_name=REGION)
+        try:
+            resp = sm.describe_endpoint(EndpointName=ENDPOINT_NAME)
+            status = resp["EndpointStatus"]
+            if status == "InService":
+                print(f"Endpoint {ENDPOINT_NAME} already InService, skipping redeployment.")
+                print("\nDone! Test with: python deploy.py --test")
+                exit(0)
+            if status in ("Updating", "Creating"):
+                print(f"Endpoint {ENDPOINT_NAME} is {status}, waiting for it to finish...")
+                waiter = sm.get_waiter("endpoint_in_service")
+                waiter.wait(EndpointName=ENDPOINT_NAME, WaiterConfig={"Delay": 30, "MaxAttempts": 30})
+                print(f"Endpoint {ENDPOINT_NAME} is now InService!")
+                print("\nDone! Test with: python deploy.py --test")
+                exit(0)
+            print(f"Endpoint {ENDPOINT_NAME} exists but status is {status}, redeploying...")
+        except sm.exceptions.ClientError:
+            print(f"Endpoint {ENDPOINT_NAME} not found, creating...")
+
         tar_path = os.path.join(SCRIPT_DIR, "model.tar.gz")
         package_model(tar_path)
         s3_uri = upload_to_s3(tar_path)

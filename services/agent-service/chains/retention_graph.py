@@ -23,8 +23,21 @@ load_dotenv()
 MODEL_ID = os.getenv("MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
-SYSTEM_MESSAGE = """You are the Retention Engine AI for TriLink Telecom.
-You help retention managers analyze customer risk and take action.
+GATHERER_PROMPT = """You are the Data Gathering Agent for the TriLink Telecom Retention Engine.
+Your job is to collect all relevant customer data by calling the appropriate tools.
+
+When a user asks about a customer:
+1. ALWAYS call get_customer_details to get their account information
+2. ALWAYS call predict_churn to get their churn probability and risk level
+3. If a transcript is provided, call analyze_call for sentiment analysis
+4. If asked about high-risk customers, call get_high_risk_customers
+
+You MUST call tools to gather data. Do not try to answer without data.
+After gathering data, summarize what you found factually — do not make recommendations yet."""
+
+STRATEGIST_PROMPT = """You are the Retention Strategist for TriLink Telecom.
+You receive customer data and churn analysis from the Data Gathering Agent.
+Your job is to evaluate the situation and recommend a specific retention action.
 
 TRILINK PRODUCT CATALOG:
   - Basic_25: 25 Mbps, $34-48/month
@@ -36,7 +49,16 @@ APPROVED RETENTION ACTIONS:
   MEDIUM RISK (40-70%): FOLLOWUP_48H, GOODWILL_CREDIT, SPEED_BOOST
   LOW RISK (<40%): MONITOR
 
-Only recommend actions from these lists. Be conversational but precise."""
+YOUR RESPONSE MUST INCLUDE:
+1. Customer summary (plan, tenure, key risk factors)
+2. Churn Risk: HIGH/MEDIUM/LOW with probability
+3. Sentiment: if call data available
+4. Action: [ACTION_CODE] — one from the approved list above
+5. Recommendation: 2-3 sentences justifying why this action fits this specific customer
+
+Consider the customer's plan tier, contract type, complaint history, and sentiment
+when choosing between actions. A customer on Basic_25 with speed complaints may benefit
+more from SPEED_BOOST than LOYALTY_DISCOUNT. Be specific to their situation."""
 
 
 # ── State Definition ──────────────────────────────────────────────────
@@ -54,8 +76,8 @@ class RetentionState(TypedDict):
 tools = [get_customer_details, analyze_call, predict_churn, get_high_risk_customers]
 
 llm = ChatBedrock(
-    model=MODEL_ID,
-    region=AWS_REGION,
+    model_id=MODEL_ID,
+    region_name=AWS_REGION,
     model_kwargs={"max_tokens": 1024, "temperature": 0},
 )
 
@@ -93,17 +115,26 @@ def classify_request(state: RetentionState) -> RetentionState:
 
 
 def call_model(state: RetentionState) -> RetentionState:
-    """Call the LLM with tools bound. It decides which tools to use."""
-    system = SystemMessage(content=SYSTEM_MESSAGE)
+    """Data Gathering Agent — calls tools to collect customer data."""
+    system = SystemMessage(content=GATHERER_PROMPT)
     response = llm_with_tools.invoke([system] + state["messages"])
     return {"messages": [response], "request_type": state["request_type"],
             "customer_id": state.get("customer_id"), "has_transcript": state.get("has_transcript", False)}
 
 
 def handle_tool_response(state: RetentionState) -> RetentionState:
-    """Process tool results and call LLM again for final response."""
-    system = SystemMessage(content=SYSTEM_MESSAGE)
+    """Data Gathering Agent — reviews tool results, may request more tools."""
+    system = SystemMessage(content=GATHERER_PROMPT)
     response = llm_with_tools.invoke([system] + state["messages"])
+    return {"messages": [response], "request_type": state["request_type"],
+            "customer_id": state.get("customer_id"), "has_transcript": state.get("has_transcript", False)}
+
+
+def strategist(state: RetentionState) -> RetentionState:
+    """Retention Strategist — evaluates gathered data and recommends action."""
+    system = SystemMessage(content=STRATEGIST_PROMPT)
+    # Use base LLM without tools — strategist only reasons, doesn't call tools
+    response = llm.invoke([system] + state["messages"])
     return {"messages": [response], "request_type": state["request_type"],
             "customer_id": state.get("customer_id"), "has_transcript": state.get("has_transcript", False)}
 
@@ -134,33 +165,37 @@ def build_retention_graph():
 
     # Add nodes
     graph.add_node("classify", classify_request)
-    graph.add_node("model", call_model)
+    graph.add_node("model", call_model)          # Data Gathering Agent
     graph.add_node("tools", tool_node)
     graph.add_node("respond", handle_tool_response)
+    graph.add_node("strategist", strategist)      # Retention Strategist
 
     # Entry point
     graph.set_entry_point("classify")
 
-    # Classify → Model (always go to model after classification)
+    # Classify → Model (always go to data gathering agent)
     graph.add_edge("classify", "model")
 
-    # Model → Tools or End
+    # Model → Tools or Strategist (if no tools needed, go straight to strategist)
     graph.add_conditional_edges("model", should_use_tools, {
         "tools": "tools",
-        "end": END,
+        "end": "strategist",
     })
 
-    # Tools → Respond (model interprets tool results)
+    # Tools → Respond (gathering agent reviews tool results)
     graph.add_conditional_edges("tools", after_tools, {
         "model": "respond",
         "end": END,
     })
 
-    # Respond → Tools or End (may need more tool calls)
+    # Respond → Tools (need more data) or Strategist (data complete)
     graph.add_conditional_edges("respond", should_use_tools, {
         "tools": "tools",
-        "end": END,
+        "end": "strategist",
     })
+
+    # Strategist → End (final recommendation)
+    graph.add_edge("strategist", END)
 
     return graph.compile(checkpointer=MemorySaver())
 

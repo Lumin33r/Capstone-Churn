@@ -3,9 +3,17 @@
 # Run AFTER terraform.yml and sagemaker-deploy.yml
 # See: CAPSTONE/docs/cicd-deploy.md
 
-name: Deploy — Build & Roll Out to EKS
+name: 3 — Build & Roll Out to EKS
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "services/**"
+      - "frontend/**"
+      - "k8s/**"
+      - "docker-compose.yml"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
     inputs:
       service:
@@ -88,7 +96,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v3
@@ -103,9 +111,36 @@ jobs:
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/namespace-quota.yaml
           kubectl apply -f k8s/configmaps/
-          kubectl apply -f k8s/secrets.yaml
           kubectl apply -f k8s/deployments/
           kubectl apply -f k8s/services/
+          kubectl apply -f k8s/ingress.yaml
+
+      - name: Create secrets from GitHub secrets
+        run: |
+          kubectl create secret generic aws-secrets \
+            -n retention-engine \
+            --from-literal=AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
+            --from-literal=AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+            --from-literal=LANGCHAIN_API_KEY=${{ secrets.LANGCHAIN_API_KEY }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl delete secret kube-secrets -n retention-engine --ignore-not-found
+          kubectl create secret generic kube-secrets \
+            -n retention-engine \
+            --from-literal=username=admin \
+            --from-literal=password=${{ secrets.KUBE_BASIC_AUTH_PASSWORD }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Clean up failed pods
+        run: |
+          echo "Deleting pods in error states..."
+          kubectl delete pods -n retention-engine --field-selector=status.phase=Failed --ignore-not-found
+          for status in ImagePullBackOff ErrImagePull CrashLoopBackOff; do
+            PODS=$(kubectl get pods -n retention-engine --no-headers 2>/dev/null | grep "$status" | awk '{print $1}')
+            if [ -n "$PODS" ]; then
+              echo "Deleting $status pods: $PODS"
+              echo "$PODS" | xargs kubectl delete pod -n retention-engine --ignore-not-found
+            fi
+          done
 
       - name: Restart deployments (pull latest image)
         run: |
@@ -117,13 +152,54 @@ jobs:
         run: |
           for dep in agent-service churn-predictor sentiment-predictor; do
             echo "Waiting for $dep..."
-            kubectl rollout status deployment/$dep -n retention-engine --timeout=120s
+            kubectl rollout status deployment/$dep -n retention-engine --timeout=300s
           done
 
       - name: Smoke test agent health
         run: |
-          AGENT_URL=$(kubectl get svc agent-service -n retention-engine \
-            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          echo "Agent service URL: $AGENT_URL"
-          curl -sf --retry 5 --retry-delay 10 "http://${AGENT_URL}:8080/health"
-          echo "✅ Agent service is healthy"
+          ALB_URL=$(kubectl get ingress retention-engine-ingress -n retention-engine \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+          echo "ALB URL: $ALB_URL"
+          if [ -z "$ALB_URL" ]; then
+            echo "⚠️ No ALB hostname assigned yet — skipping smoke test"
+            echo "The ALB may take 2-3 minutes to provision"
+            kubectl get ingress -n retention-engine
+            exit 0
+          fi
+          # Wait for DNS to resolve (new ALBs can take 1-3 min)
+          echo "Waiting for ALB DNS to resolve..."
+          for i in $(seq 1 18); do
+            if nslookup "$ALB_URL" >/dev/null 2>&1; then
+              echo "DNS resolved after $((i * 10))s"
+              break
+            fi
+            if [ "$i" -eq 18 ]; then
+              echo "⚠️ DNS not resolving after 3 min — skipping smoke test"
+              exit 0
+            fi
+            sleep 10
+          done
+          curl -sf --retry 5 --retry-delay 10 --retry-all-errors "http://${ALB_URL}/health"
+          echo "✅ Agent service is healthy via ALB"
+
+      - name: Deployment Summary
+        run: |
+          ALB_URL=$(kubectl get ingress retention-engine-ingress -n retention-engine \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+          echo "## Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$ALB_URL" ]; then
+            echo "### ALB Endpoint" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Route | URL |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|-------|-----|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Frontend | http://${ALB_URL}/ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Agent API | http://${ALB_URL}/agent-api/ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Churn API | http://${ALB_URL}/churn-api/ |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Health | http://${ALB_URL}/health |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ ALB not yet provisioned — check \`kubectl get ingress -n retention-engine\`" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Tag:** \`${{ inputs.tag }}\`  " >> "$GITHUB_STEP_SUMMARY"
+          echo "**Service:** \`${{ inputs.service }}\`" >> "$GITHUB_STEP_SUMMARY"

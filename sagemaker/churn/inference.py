@@ -36,9 +36,11 @@ def model_fn(model_dir):
 
 
 def input_fn(request_body, request_content_type):
-    """Parse the incoming JSON request."""
+    """Parse the incoming request (JSON or CSV)."""
     if request_content_type == "application/json":
         return json.loads(request_body)
+    if request_content_type == "text/csv":
+        return [float(x) for x in request_body.strip().split(",")]
     raise ValueError(f"Unsupported content type: {request_content_type}")
 
 
@@ -46,18 +48,20 @@ def predict_fn(input_data, model_artifacts):
     """Run prediction using the loaded model."""
     booster = model_artifacts["booster"]
     feature_columns = model_artifacts["feature_columns"]
-    label_encoders = model_artifacts["label_encoders"]
 
-    # Encode categorical / boolean fields
-    for col, mapping in label_encoders.items():
-        val = str(input_data.get(col, ""))
-        if val in mapping:
-            input_data[col] = mapping[val]
-        else:
-            input_data[col] = 0
-
-    # Build array in the correct column order
-    row = [float(input_data.get(col, 0)) for col in feature_columns]
+    if isinstance(input_data, list):
+        # CSV input: already numeric values in feature-column order
+        row = input_data
+    else:
+        # JSON input: needs label encoding
+        label_encoders = model_artifacts["label_encoders"]
+        for col, mapping in label_encoders.items():
+            val = str(input_data.get(col, ""))
+            if val in mapping:
+                input_data[col] = mapping[val]
+            else:
+                input_data[col] = 0
+        row = [float(input_data.get(col, 0)) for col in feature_columns]
     dmatrix = xgb.DMatrix(np.array([row]), feature_names=feature_columns)
 
     # Predict probability
