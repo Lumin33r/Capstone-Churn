@@ -1,0 +1,190 @@
+# .github/workflows/teardown.yml
+# Safe teardown of AWS + K8s resources for full CI/CD pipeline testing
+# PRESERVES: EKS cluster, SageMaker endpoints, S3 bucket, sagemaker-execution-role
+#
+# After teardown, rebuild in order:
+#   1. terraform.yml  → apply (IAM roles, ALB controller IAM + Helm install, transcribe Lambda)
+#   2. sagemaker-deploy.yml → deploy both (no-op if endpoints exist)
+#   3. deploy.yml → all (build images, apply K8s, restart pods)
+
+name: 0 — Safe Teardown
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "What to tear down"
+        required: true
+        type: choice
+        options:
+          - all
+          - terraform
+          - kubernetes
+          - alb-controller
+        default: all
+      confirm:
+        description: "Type TEARDOWN to confirm (safety check)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  teardown:
+    runs-on: ubuntu-latest
+    steps:
+      # ── Safety Gate ───────────────────────────────────────────────
+      - name: Safety check
+        if: inputs.confirm != 'TEARDOWN'
+        run: |
+          echo "❌ Safety check failed — type TEARDOWN to confirm"
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # ── Tool Setup ────────────────────────────────────────────────
+      - name: Setup kubectl
+        if: inputs.scope == 'all' || inputs.scope == 'kubernetes' || inputs.scope == 'alb-controller'
+        uses: azure/setup-kubectl@v3
+
+      - name: Write kubeconfig
+        if: inputs.scope == 'all' || inputs.scope == 'kubernetes' || inputs.scope == 'alb-controller'
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > "$HOME/.kube/config"
+
+      - name: Setup Helm
+        if: inputs.scope == 'all' || inputs.scope == 'alb-controller'
+        uses: azure/setup-helm@v4
+
+      - name: Setup Terraform
+        if: inputs.scope == 'all' || inputs.scope == 'terraform'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7"
+
+      # ── Phase 1: Delete Ingress (ALB controller cleans up the ALB) ─
+      - name: Delete Ingress (triggers ALB cleanup)
+        if: inputs.scope == 'all' || inputs.scope == 'kubernetes'
+        run: |
+          if ! kubectl get ingress retention-engine-ingress -n retention-engine &>/dev/null; then
+            echo "⚠️ Ingress not found — skipping"
+            exit 0
+          fi
+
+          # Capture ALB name before deletion for AWS-side polling
+          ALB_HOSTNAME=$(kubectl get ingress retention-engine-ingress -n retention-engine \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+          ALB_NAME=""
+          if [ -n "$ALB_HOSTNAME" ]; then
+            ALB_NAME="${ALB_HOSTNAME%%.*}"
+            echo "Found ALB: $ALB_HOSTNAME"
+          fi
+
+          echo "Deleting Ingress — ALB controller will remove the ALB..."
+          kubectl delete ingress retention-engine-ingress -n retention-engine --timeout=120s || true
+
+          # If stuck on finalizer after timeout, force-remove it
+          if kubectl get ingress retention-engine-ingress -n retention-engine &>/dev/null; then
+            echo "⚠️ Ingress stuck on finalizer — removing finalizer..."
+            kubectl patch ingress retention-engine-ingress -n retention-engine \
+              --type=json -p='[{"op": "remove", "path": "/metadata/finalizers"}]' || true
+            sleep 5
+          fi
+
+          if kubectl get ingress retention-engine-ingress -n retention-engine &>/dev/null; then
+            echo "⚠️ Ingress still exists — continuing anyway"
+          else
+            echo "✅ Ingress deleted from Kubernetes"
+          fi
+
+          # Wait for ALB to be deprovisioned in AWS
+          if [ -z "$ALB_NAME" ]; then
+            echo "⚠️ No ALB name — skipping AWS polling"
+          else
+            echo "Waiting for ALB to be deprovisioned in AWS..."
+            for i in $(seq 1 12); do
+              if ! aws elbv2 describe-load-balancers --names "$ALB_NAME" >/dev/null 2>&1; then
+                echo "✅ ALB cleaned up in AWS"
+                break
+              fi
+              echo "  [$i/12] ALB still exists — waiting 10s..."
+              sleep 10
+            done
+          fi
+      # ── Phase 2: Delete K8s namespace ─────────────────────────────
+      - name: Delete K8s namespace
+        if: inputs.scope == 'all' || inputs.scope == 'kubernetes'
+        run: |
+          echo "Deleting retention-engine namespace and all resources..."
+          kubectl delete namespace retention-engine --ignore-not-found --timeout=120s
+          kubectl delete ingressclass alb --ignore-not-found
+          echo "✅ Kubernetes resources deleted"
+
+      # ── Phase 3: Uninstall ALB controller ─────────────────────────
+      - name: Uninstall ALB controller
+        if: inputs.scope == 'all' || inputs.scope == 'alb-controller'
+        run: |
+          if helm status aws-load-balancer-controller -n kube-system &>/dev/null; then
+            echo "Uninstalling ALB controller Helm release..."
+            helm uninstall aws-load-balancer-controller -n kube-system --wait
+            echo "✅ ALB controller uninstalled"
+          else
+            echo "⚠️ ALB controller not installed — skipping"
+          fi
+
+      # ── Phase 4: Terraform destroy (safe targets) ─────────────────
+      - name: Terraform Init
+        if: inputs.scope == 'all' || inputs.scope == 'terraform'
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform destroy — IAM roles and policies
+        if: inputs.scope == 'all' || inputs.scope == 'terraform'
+        working-directory: terraform
+        run: |
+          echo "🔴 Destroying Terraform-managed resources..."
+          echo "   Preserving: S3 bucket, sagemaker-execution-role, ALB controller IAM policy (Troy lacks iam:DeletePolicyVersion)"
+          terraform destroy -var="environment=dev" -auto-approve \
+            -target=aws_iam_role_policy.bedrock_invoke_policy \
+            -target=aws_iam_role.bedrock_role \
+            -target=aws_iam_role_policy.sagemaker_invoke_policy \
+            -target=aws_iam_role.sagemaker_invoke_role \
+            -target=aws_iam_role_policy.sagemaker_featurestore_policy \
+            -target=aws_iam_role.sagemaker_featurestore_role \
+            -target=aws_iam_role.alb_controller \
+            -target=aws_s3_bucket_notification.audio_upload_trigger \
+            -target=aws_lambda_permission.allow_s3_invoke \
+            -target=aws_lambda_function.transcribe_pipeline \
+            -target=aws_iam_role_policy.transcribe_lambda_policy \
+            -target=aws_iam_role.transcribe_lambda_role
+          echo "✅ Terraform resources destroyed"
+
+      # ── Summary ───────────────────────────────────────────────────
+      - name: Teardown Summary
+        if: always()
+        run: |
+          echo "## 🧹 Teardown Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Scope:** \`${{ inputs.scope }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### ✅ Preserved" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Resource | Reason |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| EKS cluster \`eks-ezvrmopo-okl\` | Not managed by Terraform |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| SageMaker endpoints (churn + sentiment) | Not managed by Terraform |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| S3 bucket \`retention-engine-bucket\` | Contains training data |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| IAM role \`sagemaker-execution-role\` | Used by running endpoints |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🔄 Rebuild Order" >> "$GITHUB_STEP_SUMMARY"
+          echo "1. **Terraform** → \`workflow_dispatch\` → action: \`apply\`, env: \`dev\` (includes ALB controller Helm install)" >> "$GITHUB_STEP_SUMMARY"
+          echo "2. **SageMaker** → \`workflow_dispatch\` → endpoint: \`both\`, action: \`deploy\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "3. **Deploy** → \`workflow_dispatch\` → service: \`all\`, tag: \`latest\`" >> "$GITHUB_STEP_SUMMARY"

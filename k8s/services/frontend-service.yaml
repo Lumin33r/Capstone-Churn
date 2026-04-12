@@ -1,13 +1,16 @@
+# k8s/services/frontend-service.yaml
+# Internal service for frontend — exposed externally via Ingress
 apiVersion: v1
 kind: Service
 metadata:
   name: frontend-service
   namespace: retention-engine
   labels:
-    app: frontend
+    app: frontend-deployment
+    team: retention-engine
 spec:
   selector:
-    app: frontend
+    app: frontend-deployment
   ports:
     - protocol: TCP
       port: 3000
