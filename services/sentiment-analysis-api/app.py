@@ -3,6 +3,7 @@ import json
 import logging
 import time
 import random
+import csv
 import pandas as pd
 from typing import Any
 
@@ -79,24 +80,27 @@ def download_csv_from_s3() -> pd.DataFrame:
     return _customer_data
 
 
-def find_record(df: pd.DataFrame | None, call_id: str | None = None, customer_id: str | None = None) -> pd.DataFrame:
-    """Unified search method."""
+def find_record(df: pd.DataFrame | None, id: str) -> pd.DataFrame:
+    """
+    Search the DataFrame for either call_id or customer_id.
+    Priority: call_id > customer_id.
+    """
     if df is None:
         df = download_csv_from_s3()
-        
-    if "call_id" not in df.columns:
-        raise ValueError("CSV missing 'call_id' column")
     
-    if "customer_id" not in df.columns:
-        raise ValueError("CSV missing 'customer_id' column")
-    
-    if call_id:
-        return df[df["call_id"] == call_id]
-    
-    if customer_id:
-        return df[df["customer_id"] == customer_id]
-    
-    raise ValueError("Provide either call_id or customer_id")
+    if id and id[0:3] == "CALL":
+        match = df[df["call_id"] == id]
+        if match.empty:
+            raise LookupError(f"No record found for call_id={id}")
+        return match.iloc[0]
+
+    else:
+        match = df[df["customer_id"] == id]
+        if match.empty:
+            raise LookupError(f"No record found for customer_id={id}")
+        return match.iloc[0]
+
+    raise ValueError("You must provide either call_id or customer_id")
 
 
 # File Loaders
@@ -127,37 +131,6 @@ def load_notebook() -> Any:
     with open(file=notebook_path, mode="r", encoding="utf-8") as f:
         return json.load(fp=f)
 
-
-# Prompt Builder
-def build_prompt(results: dict, example: dict, notebook: dict, user_input: str) -> str:
-    return f"""
-AGENT INSTRUCTIONS: TRANSCRIPT SENTIMENT ANALYZER
-
-PERSONA
-You are a Senior Customer Experience Analyst specializing in linguistic sentiment analysis. 
-Your role is to serve as the initial intelligence layer in the Retention Engine pipeline.
-
-GOAL
-Analyze the provided customer service transcript provided by the user input to determine the sentiment,
-primary category, a confidence score, and other data fields based on the output format. 
-
-CONSTRAINTS
-1. Transcript must be 0–20,000 UTF-8 characters.
-2. Do not invent customer details.
-3. Sentiment must be Positive, Negative, or Neutral.
-4. Identify the primary call category.
-
-CONTEXT:
-Notebook tools:
-{json.dumps(obj=notebook)}
-
-USER_INPUT:
-{user_input}
-
-OUTPUT FORMAT:
-results: {json.dumps(obj=results)}
-example: {json.dumps(obj=example)}
-"""
 
 
 # Guardrail Logic
@@ -214,14 +187,14 @@ def invoke_with_retries(
 def chunk_text(text: str, max_chars: int = 4000) -> list[str]:
     return [text[i:i + max_chars] for i in range(0, len(text), max_chars)]
 
-def run_guardrails(prompt: str, transcript: str) -> dict[str, Any]:
+def run_guardrails(transcript: str) -> dict[str, Any]:
     guardrail = get_guardrail_info()
     runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
     # Combine everything into ONE guardrail call
-    combined_text = f"PROMPT:\n{prompt}\n\nTRANSCRIPT:\n{transcript}"
+    text = f"TRANSCRIPT:{transcript}"
 
     # Chunk if needed to avoid text‑unit throttling
-    chunks = chunk_text(text=combined_text)
+    chunks = chunk_text(text=text)
 
    
     # Evaluate each chunk
@@ -265,21 +238,19 @@ def encode_features(raw: dict, label_encoders: dict) -> str:
     """Encode a raw feature dict to a CSV string for SageMaker."""
     LABEL_ENCODERS = label_encoders
     for col, mapping in LABEL_ENCODERS.items():
-        raw[col] = mapping.get(str(raw.get(col, "")), 0)
+        raw[col] = mapping.get(str(object=raw.get(col, "")), 0)
 
-    return ",".join(str(float(raw.get(col, 0))) for col in FEATURE_COLUMNS)
+    return ",".join(str(object=float(raw.get(col, 0))) for col in FEATURE_COLUMNS)
 
 # Sagemaker Invocation
-def invoke_sagemaker(prompt: str, transcript: str) -> dict[str, Any]:
-    payload = {
-        "inputs": f"{prompt}\n\nTranscript:\n{transcript}",
-        "parameters": {"temperature": 0.1, "max_new_tokens": 512}
-    }
-
+def invoke_sagemaker(customer: Any) -> dict[str, Any]:
+    if isinstance(customer, pd.Series):
+        customer = customer.to_dict()
+        
     response = sagemaker_runtime.invoke_endpoint(
         EndpointName=SENTIMENT_ENDPOINT_NAME,
         ContentType="application/json",
-        Body=json.dumps(obj=payload)
+        Body=json.dumps(obj=customer)
     )
 
     return json.loads(s=response["Body"].read().decode())
@@ -336,14 +307,14 @@ def health() -> dict[str, str]:
 
 
 @app.post(path="/sentiment", response_model=CallResponse)
-def analyze_sentiment(req: CallRecord, input: str | None = None) -> dict[str, Any] | dict[str, Any] | dict[str, str]:
+def analyze_sentiment(req: CallRecord | dict, input: str | None = None) -> dict[str, Any] | dict[str, Any] | dict[str, str]:
 
     customer_data = download_csv_from_s3()
     
-    if req.customer_id not in customer_data.index:
-        raise HTTPException(status_code=404, detail=f"Customer {req.customer_id} not found")
+    # if req.customer_id not in customer_data.index:
+        # raise HTTPException(status_code=404, detail=f"Customer {req.customer_id} not found")
     
-    customer = customer_data.req.customer_id 
+    customer = find_record(customer_data, req["customer_id"])
     # Validate transcript length
     char_count = len(customer.call_transcript.encode(encoding="utf-8"))
     if char_count < 0:
@@ -355,18 +326,9 @@ def analyze_sentiment(req: CallRecord, input: str | None = None) -> dict[str, An
     files = load_model_files()
     notebook = load_notebook()
 
-
-    # Build prompt
-    prompt = build_prompt(
-        results=files["results"],
-        example=files["example"],
-        notebook=notebook,
-        input = input or ""
-    )
-
     # Guardrail check
-    guardrail = run_guardrails(prompt=prompt, transcript=customer.transcript)
-    if guardrail["blocked"]:
+    guardrail = run_guardrails(transcript=customer.call_transcript)
+    if guardrail["blocked"] == True:
         return {
             "error": guardrail["reason"],
             "blocked": True,
@@ -375,7 +337,8 @@ def analyze_sentiment(req: CallRecord, input: str | None = None) -> dict[str, An
 
     # Invoke Sagemaker
     try:
-        return invoke_sagemaker(prompt=prompt, transcript=customer.transcript)
+        return invoke_sagemaker(customer=req)
     except Exception as e:
         logger.exception(msg="Sagemaker invocation failed")
         return {"error": str(object=e), "status": "failure"}
+

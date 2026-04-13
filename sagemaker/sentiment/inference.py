@@ -1,4 +1,3 @@
-
 import logging
 import torch
 import os
@@ -6,6 +5,7 @@ import re
 import json
 import traceback
 import subprocess
+import sys
 
 from typing import Any, Dict, Tuple, Literal
 import torch.nn.functional as F
@@ -281,7 +281,7 @@ def compute_sentiment_shift(trajectory) -> float:
     return float(np.linalg.norm(shift_vector))
 
 # QA Score Helper
-def qa_score(text: str) -> dict:
+def qa_score(text: str) -> float:
     empathy = empathy_score(text=text)
     frustration = emotion_frustration(text=text)
     toxicity = toxicity_score(text=text)
@@ -318,20 +318,19 @@ def qa_score(text: str) -> dict:
 
     score = max(0, min(100, score))
 
-    return {
-        "qa_score": score,
-    }
+    return score
 
 
 
 # MODEL LOADING
 def model_fn(model_dir: str) -> Any:
-    
-    subprocess.check_call(args=["pip", "install", "-r", "/opt/ml/model/requirements.txt"])
+    # subprocess.check_call(args=["pip", "install", "-r", "/opt/ml/model/requirements.txt"])
     
     global tokenizer, model, sentiment_schema
     logger.info(msg=f"[DEBUG] model_dir = {model_dir}")
     logger.info(msg=f"[DEBUG] Files in model_dir: {os.listdir(path=model_dir)}")
+    
+    
     try:
         logger.info(msg=f"[model_fn] Loading tokenizer from: {model_dir}")
         tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path=model_dir)
@@ -340,11 +339,17 @@ def model_fn(model_dir: str) -> Any:
         model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path=model_dir)
         model.to(DEVICE)
         model.eval()
-        
+    
+
         # Load schema
         schema_path = os.path.join(model_dir, "sentiment_schema.json")
         with open(file=schema_path, mode="r") as f:
             sentiment_schema = json.load(fp=f)
+            
+        logger.info(f"[DEBUG] model.config.num_labels = {model.config.num_labels}")
+        logger.info(f"[DEBUG] model.config.id2label = {model.config.id2label}")
+        logger.info(f"[DEBUG] classifier head = {model.classifier}")
+
 
         logger.info(msg="[model_fn] Model + tokenizer loaded successfully.")
         return model
@@ -401,7 +406,6 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
         meta = inputs["meta"]
 
         results = []
-
         for text, m in zip(texts, meta): 
             # MODEL SENTIMENT
             enc = tokenizer(
@@ -411,15 +415,39 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
                 max_length=256,
                 return_tensors="pt"
             ).to(DEVICE)
-
+            
+    
             with torch.no_grad():
                 logits = model(**enc).logits
+                print("[DEBUG] Raw logits:", logits.cpu().numpy())
                 probs = torch.softmax(input=logits, dim=-1)[0].cpu().numpy()
+                
+            logger.info(f"[DEBUG] Raw logits: {logits.cpu().numpy().tolist()}")
+
+            # inputs = tokenizer(
+                #  text,
+                #  return_tensors="pt",
+                #  truncation=True,
+                #  padding="max_length",
+                #  max_length=256
+            #  )
+            #  
+            # with torch.no_grad():
+                #  outputs = model(**{k: v for k, v in inputs.items()})
+                #  probs = torch.softmax(input=outputs.logits, dim=-1)[0].cpu().numpy()
+                #  pred_idx = int(np.argmax(a=probs))
+                #  confidence = float(probs[pred_idx])
+     
+            sentiment_map = {
+              "0": "negative",
+              "1": "neutral",
+              "2": "positive",
+            }
 
             pred_idx = int(np.argmax(probs))
             confidence = float(probs[pred_idx])
+            sentiment_label = sentiment_map[str(pred_idx)]
 
-            
             # FEATURE EXTRACTION
             fr = emotion_frustration(text=text)
             ang = emotion_anger(text=text)
@@ -440,6 +468,7 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
                 "primary_scenario": m.get("primary_scenario"),
 
                 "sentiment": pred_idx,
+                "sentiment_label": sentiment_label,
                 "confidence": confidence,
 
                 "qa_score": qa,
@@ -449,7 +478,6 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
                 "escalation_flag": esc,
                 "resolution_flag": res,
             })
-
         return {"results": results}
 
     except Exception as e:
