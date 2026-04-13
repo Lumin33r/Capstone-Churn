@@ -1,4 +1,4 @@
-# Manages the set of Pods specific to the frontend application to run that application
+# Manages the set of Pods specific to the backend application to run that application
 # workload and maintain the desired state
 
 # Will deployment require rolling updates???
@@ -6,16 +6,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frontend-deployment
+  name: backend-deployment
   namespace: retention-engine
   labels:
-    app: frontend-deployment
+    app: backend-deployment
     team: retention-engine
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: frontend-deployment
+      app: backend-deployment
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -24,17 +24,17 @@ spec:
   template:
     metadata:
       labels:
-        app: frontend-deployment
+        app: backend-deployment
     spec:
       containers:
-        - name: frontend
-          image: ghcr.io/lumin33r/frontend:latest
+        - name: backend
+          image: ghcr.io/lumin33r/backend:latest
           ports:
-            - containerPort: 3000
+            - containerPort: 8000
           startupProbe:
             httpGet:
               path: /health
-              port: 3000
+              port: 8000
             initialDelaySeconds: 5
             periodSeconds: 2
             failureThreshold: 3

@@ -26,8 +26,8 @@ jobs:
           - name: churn-predictor
             path: services/churn-predictor-api
             python: true
-          - name: sentiment-api
-            path: services/sentiment-analysis-api
+          - name: sentiment-predictor
+            path: services/sentiment-predictor-api
             python: true
           - name: frontend
             path: frontend
@@ -95,8 +95,8 @@ jobs:
             context: services/agent-service
           - name: churn-predictor
             context: services/churn-predictor-api
-          - name: qa-evaluator
-            context: services/qa-evaluator-api
+          - name: sentiment-predictor
+            context: services/sentiment-predictor-api
           - name: frontend
             context: frontend
     steps:

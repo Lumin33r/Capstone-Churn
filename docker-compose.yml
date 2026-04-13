@@ -3,10 +3,9 @@
 # Usage: docker-compose up --build
 # George (gvill0576) — Capstone-Churn
 
-version: '3.9'
+version: "3.9"
 
 services:
-
   # ── Agent Service (LangChain + Bedrock) ─────────────────────────────
   agent-service:
     build:
@@ -16,18 +15,24 @@ services:
       - "8080:8080"
     environment:
       - AWS_REGION=us-east-1
-      - QA_EVALUATOR_URL=http://qa-evaluator:8000
+      - SENTIMENT_PREDICTOR_URL=http://sentiment-predictor:8000
       - CHURN_PREDICTOR_URL=http://churn-predictor:8001
       - MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0
     env_file:
       - .env
     depends_on:
-      qa-evaluator:
+      sentiment-predictor:
         condition: service_healthy
       churn-predictor:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import httpx; httpx.get('http://localhost:8080/health')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -35,17 +40,23 @@ services:
     networks:
       - retention-net
 
-  # ── QA Evaluator (Okino's SageMaker wrapper) ─────────────────────────
-  qa-evaluator:
+  # ── Sentiment Predictor (Okino's SageMaker wrapper) ─────────────────────────
+  sentiment-predictor:
     build:
-      context: ./services/qa-evaluator-api
+      context: ./services/sentiment-analysis-api
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
     env_file:
       - .env
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import httpx; httpx.get('http://localhost:8000/health')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -63,7 +74,13 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/health')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import httpx; httpx.get('http://localhost:8001/health')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -24,7 +24,7 @@ on:
           - all
           - agent-service
           - churn-predictor
-          - qa-evaluator
+          - sentiment-predictor
           - frontend
         default: all
       tag:
@@ -52,8 +52,8 @@ jobs:
             context: services/agent-service
           - name: churn-predictor
             context: services/churn-predictor-api
-          - name: qa-evaluator
-            context: services/qa-evaluator-api
+          - name: sentiment-predictor
+            context: services/sentiment-predictor-api
           - name: frontend
             context: frontend
     steps:
@@ -144,13 +144,13 @@ jobs:
 
       - name: Restart deployments (pull latest image)
         run: |
-          for dep in agent-service churn-predictor qa-evaluator frontend-deployment; do
+          for dep in agent-service churn-predictor sentiment-predictor frontend-deployment; do
             kubectl rollout restart deployment/$dep -n retention-engine || true
           done
 
       - name: Wait for rollout
         run: |
-          for dep in agent-service churn-predictor qa-evaluator; do
+          for dep in agent-service churn-predictor sentiment-predictor; do
             echo "Waiting for $dep..."
             kubectl rollout status deployment/$dep -n retention-engine --timeout=300s
           done

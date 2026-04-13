@@ -1,18 +1,18 @@
-# k8s/deployments/qa-evaluator-deployment.yaml
+# k8s/deployments/sentiment-predictor-deployment.yaml
 # Runs Okino's QA Evaluator SageMaker wrapper service
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: qa-evaluator
+  name: sentiment-predictor
   namespace: retention-engine
   labels:
-    app: qa-evaluator
+    app: sentiment-predictor
     team: retention-engine
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: qa-evaluator
+      app: sentiment-predictor
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -21,18 +21,13 @@ spec:
   template:
     metadata:
       labels:
-        app: qa-evaluator
+        app: sentiment-predictor
     spec:
       containers:
-        - name: qa-evaluator
-          image: ghcr.io/lumin33r/qa-evaluator:latest
+        - name: sentiment-predictor
+          image: ghcr.io/lumin33r/sentiment-predictor:latest
           ports:
             - containerPort: 8000
-          env:
-            - name: SENTIMENT_ENDPOINT_NAME
-              value: "retention-sentiment-analysis-endpoint"
-            - name: AWS_REGION
-              value: "us-east-1"
           envFrom:
             - secretRef:
                 name: aws-secrets

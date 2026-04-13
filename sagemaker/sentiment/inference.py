@@ -1,7 +1,3 @@
-import sys
-print("[FORCE LOG] inference script imported")
-sys.stdout.flush()
-
 import logging
 import torch
 import os
@@ -328,10 +324,6 @@ def qa_score(text: str) -> float:
 
 # MODEL LOADING
 def model_fn(model_dir: str) -> Any:
-    import sys
-    print(f"[FORCE LOG] model_fn entered. model_dir={model_dir}")
-    sys.stdout.flush()
-    sys.stderr.flush()
     # subprocess.check_call(args=["pip", "install", "-r", "/opt/ml/model/requirements.txt"])
     
     global tokenizer, model, sentiment_schema
@@ -347,23 +339,17 @@ def model_fn(model_dir: str) -> Any:
         model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path=model_dir)
         model.to(DEVICE)
         model.eval()
-        
-        print("[DEBUG] num_labels:", model.config.num_labels)
-        print("[DEBUG] id2label:", model.config.id2label)
-        print("[DEBUG] label2id:", model.config.label2id)
-
-        print("[DEBUG] Classifier head:", model.classifier)
+    
 
         # Load schema
         schema_path = os.path.join(model_dir, "sentiment_schema.json")
         with open(file=schema_path, mode="r") as f:
             sentiment_schema = json.load(fp=f)
             
-        print("[DEBUG] Loaded sentiment_schema:", sentiment_schema)
+        logger.info(f"[DEBUG] model.config.num_labels = {model.config.num_labels}")
+        logger.info(f"[DEBUG] model.config.id2label = {model.config.id2label}")
+        logger.info(f"[DEBUG] classifier head = {model.classifier}")
 
-        print("[DEBUG] Classifier head:", model.classifier)
-        print("[DEBUG] Model device:", next(model.parameters()).device)
-        print("[DEBUG] Loaded sentiment_schema:", sentiment_schema)
 
         logger.info(msg="[model_fn] Model + tokenizer loaded successfully.")
         return model
@@ -430,12 +416,14 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
                 return_tensors="pt"
             ).to(DEVICE)
             
-            print("[DEBUG] Text", text, m)
+    
             with torch.no_grad():
                 logits = model(**enc).logits
                 print("[DEBUG] Raw logits:", logits.cpu().numpy())
                 probs = torch.softmax(input=logits, dim=-1)[0].cpu().numpy()
-            
+                
+            logger.info(f"[DEBUG] Raw logits: {logits.cpu().numpy().tolist()}")
+
             # inputs = tokenizer(
                 #  text,
                 #  return_tensors="pt",
@@ -451,36 +439,14 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
                 #  confidence = float(probs[pred_idx])
      
             sentiment_map = {
-              "0": "very_negative",
-              "1": "negative",
-              "2": "slightly_negative",
-              "3": "neutral",
-              "4": "positive",
-              "5": "very_positive"
+              "0": "negative",
+              "1": "neutral",
+              "2": "positive",
             }
 
             pred_idx = int(np.argmax(probs))
             confidence = float(probs[pred_idx])
             sentiment_label = sentiment_map[str(pred_idx)]
-            
-            print("[DEBUG] Probabilities:", probs)
-            print("[DEBUG] Predicted index:", pred_idx)
-            print("[DEBUG] Confidence:", confidence)
-
-
-            print("=== SENTIMENT DEBUG START ===")
-
-            print("[DEBUG] num_labels:", model.config.num_labels)
-            print("[DEBUG] id2label:", model.config.id2label)
-            print("[DEBUG] label2id:", model.config.label2id)
-
-            print("[DEBUG] Raw logits:", logits.cpu().numpy())
-            print("[DEBUG] Probabilities:", probs)
-
-            print("[DEBUG] Predicted index:", pred_idx)
-            print("[DEBUG] Confidence:", confidence)
-
-            print("=== SENTIMENT DEBUG END ===")
 
             # FEATURE EXTRACTION
             fr = emotion_frustration(text=text)
@@ -512,7 +478,6 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
                 "escalation_flag": esc,
                 "resolution_flag": res,
             })
-
         return {"results": results}
 
     except Exception as e:

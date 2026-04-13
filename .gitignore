@@ -2,6 +2,7 @@
 .terraform/
 *.tfstate
 *.tfstate.backup
+*.tfstate.lock.info
 *.tfvars
 .terraform.lock.hcl
 
@@ -28,3 +29,7 @@ dist/
 
 # Data
 sagemaker/*/data/*.csv
+
+# Model Training Artifacts
+sagemaker/*/sentiment_model/*
+sagemaker/*/model.tar.gz

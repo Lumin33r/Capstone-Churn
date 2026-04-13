@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentiment-wrapper-deployment
+  namespace: retention-engine
+  labels:
+    app: sentiment-wrapper-deployment
+    team: retention-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels: 
+      app: sentiment-wrapper-deployment
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: sentiment-wrapper-deployment
+    spec:
+      containers:
+        - name: sentiment-wrapper-deployment
+          image: ghcr.io/lumin33r/sentiment-wrapper-deployment:latest
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"

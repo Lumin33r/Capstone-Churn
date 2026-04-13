@@ -9,31 +9,31 @@ import io
 import json
 import os
 import logging
-import time
 
 import boto3
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Any
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(name=__name__)
 
 app = FastAPI(title="Churn Predictor API")
 
 app.add_middleware(
-    CORSMiddleware,
+    middleware_class=CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # --- Config ---
-REGION = os.environ.get("AWS_REGION", "us-east-1")
-ENDPOINT_NAME = os.environ.get("SAGEMAKER_ENDPOINT", "churn-predictor-endpoint")
-S3_BUCKET = os.environ.get("S3_BUCKET", "retention-engine-bucket")
+REGION = os.environ.get(key="AWS_REGION", default="us-east-1")
+ENDPOINT_NAME = os.environ.get(key="SAGEMAKER_ENDPOINT", default="churn-predictor-endpoint")
+S3_BUCKET = os.environ.get(key="S3_BUCKET", default="retention-engine-bucket")
 
 sagemaker_runtime = boto3.client("sagemaker-runtime", region_name=REGION)
 s3 = boto3.client("s3", region_name=REGION)
@@ -75,13 +75,13 @@ def load_account_data() -> pd.DataFrame:
         return _account_data
 
     obj = s3.get_object(Bucket=S3_BUCKET, Key="data/internet_data.csv")
-    internet_df = pd.read_csv(io.BytesIO(obj["Body"].read()))
+    internet_df = pd.read_csv(filepath_or_buffer=io.BytesIO(initial_bytes=obj["Body"].read()))
 
     obj = s3.get_object(Bucket=S3_BUCKET, Key="data/trilink_customers_data.csv")
-    customers_df = pd.read_csv(io.BytesIO(obj["Body"].read()))
+    customers_df = pd.read_csv(filepath_or_buffer=io.BytesIO(initial_bytes=obj["Body"].read()))
 
-    merged = internet_df.merge(customers_df, on="customer_id", how="inner")
-    _account_data = merged.set_index("customer_id")
+    merged = internet_df.merge(right=customers_df, on="customer_id", how="inner")
+    _account_data = merged.set_index(keys="customer_id")
     return _account_data
 
 
@@ -91,11 +91,11 @@ def load_agent1_data() -> pd.DataFrame:
         return _agent1_data
     try:
         obj = s3.get_object(Bucket=S3_BUCKET, Key="data/agent1_synthetic_output.csv")
-        _agent1_data = pd.read_csv(io.BytesIO(obj["Body"].read())).set_index("customer_id")
+        _agent1_data = pd.read_csv(filepath_or_buffer=io.BytesIO(initial_bytes=obj["Body"].read())).set_index(keys="customer_id")
     except Exception:
-        local_path = os.path.join(os.path.dirname(__file__), "../../sagemaker/churn/data/agent1_synthetic_output.csv")
-        if os.path.exists(local_path):
-            _agent1_data = pd.read_csv(local_path).set_index("customer_id")
+        local_path = os.path.join(os.path.dirname(p=__file__), "../../sagemaker/churn/data/agent1_synthetic_output.csv")
+        if os.path.exists(path=local_path):
+            _agent1_data = pd.read_csv(filepath_or_buffer=local_path).set_index(keys="customer_id")
         else:
             _agent1_data = pd.DataFrame()
     return _agent1_data
@@ -104,8 +104,8 @@ def load_agent1_data() -> pd.DataFrame:
 def encode_row(raw: dict) -> str:
     """Encode a raw feature dict to CSV string for SageMaker."""
     for col, mapping in LABEL_ENCODERS.items():
-        raw[col] = mapping.get(str(raw.get(col, "")), 0)
-    return ",".join(str(float(raw.get(col, 0))) for col in FEATURE_COLUMNS)
+        raw[col] = mapping.get(str(object=raw.get(col, "")), 0)
+    return ",".join(str(object=float(raw.get(col, 0))) for col in FEATURE_COLUMNS)
 
 
 def build_raw_features(customer: pd.Series, qa_score: float, sentiment: str,
@@ -155,7 +155,7 @@ def compute_risk_cache() -> list[dict]:
     if _risk_cache is not None:
         return _risk_cache
 
-    logger.info("Computing high-risk cache (batch prediction)...")
+    logger.info(msg="Computing high-risk cache (batch prediction)...")
     account_data = load_account_data()
     agent1_data = load_agent1_data()
 
@@ -175,11 +175,11 @@ def compute_risk_cache() -> list[dict]:
         call = agent1_data.loc[cid]
 
         raw = build_raw_features(
-            customer,
-            float(call["qa_score"]), str(call["sentiment"]),
-            float(call["emotion_frustration"]), float(call["emotion_anger"]),
-            float(call["sentiment_shift"]), int(call["escalation_flag"]),
-            int(call["resolution_flag"]),
+            customer=customer,
+            qa_score=float(call["qa_score"]), sentiment=str(object=call["sentiment"]),
+            emotion_frustration=float(call["emotion_frustration"]), emotion_anger=float(call["emotion_anger"]),
+            sentiment_shift=float(call["sentiment_shift"]), escalation_flag=int(call["escalation_flag"]),
+            resolution_flag=int(call["resolution_flag"]),
         )
         csv_rows.append(encode_row(raw))
         customer_ids.append(cid)
@@ -216,18 +216,18 @@ def compute_risk_cache() -> list[dict]:
 
     # Build results
     results = []
-    for j, proba in enumerate(all_probas):
+    for j, proba in enumerate(iterable=all_probas):
         if proba >= 0.4:  # only cache MEDIUM and HIGH risk
             results.append({
                 "customer_id": customer_ids[j],
-                "churn_probability": round(proba, 4),
+                "churn_probability": round(number=proba, ndigits=4),
                 "risk_level": "HIGH" if proba >= 0.7 else "MEDIUM",
                 **metadata[j],
             })
 
     results.sort(key=lambda x: x["churn_probability"], reverse=True)
     _risk_cache = results
-    logger.info(f"Risk cache built: {len(results)} at-risk customers")
+    logger.info(msg=f"Risk cache built: {len(results)} at-risk customers")
     return _risk_cache
 
 
@@ -259,17 +259,17 @@ class PredictResponse(BaseModel):
 
 
 # --- Routes ---
-@app.get("/health")
-def health():
+@app.get(path="/health")
+def health() -> dict[str, str]:
     return {"status": "healthy", "model": "churn-xgboost", "endpoint": ENDPOINT_NAME}
 
 
-@app.get("/customers")
-def list_customers(q: str = "", limit: int = 20):
+@app.get(path="/customers")
+def list_customers(q: str = "", limit: int = 20) -> list[Any]:
     """Search customers for the frontend dropdown."""
     account_data = load_account_data()
     agent1_data = load_agent1_data()
-    matches = account_data.index[account_data.index.str.contains(q, case=False)][:limit]
+    matches = account_data.index[account_data.index.str.contains(pat=q, case=False)][:limit]
     results = []
     for cid in matches:
         row = account_data.loc[cid]
@@ -283,8 +283,8 @@ def list_customers(q: str = "", limit: int = 20):
     return results
 
 
-@app.get("/customer-details/{customer_id}")
-def customer_details(customer_id: str):
+@app.get(path="/customer-details/{customer_id}")
+def customer_details(customer_id: str) -> dict[str, Any]:
     """Return full account details for a customer. Used by the agent."""
     account_data = load_account_data()
     agent1_data = load_agent1_data()
@@ -318,15 +318,15 @@ def customer_details(customer_id: str):
     return result
 
 
-@app.get("/high-risk")
-def high_risk_customers(limit: int = 10):
+@app.get(path="/high-risk")
+def high_risk_customers(limit: int = 10) -> list[dict[Any, Any]]:
     """Return top N highest-risk customers from pre-computed cache."""
     results = compute_risk_cache()
     return results[:limit]
 
 
-@app.post("/predict", response_model=PredictResponse)
-def predict(req: PredictRequest):
+@app.post(path="/predict", response_model=PredictResponse)
+def predict(req: PredictRequest) -> PredictResponse:
     try:
         account_data = load_account_data()
         agent1_data = load_agent1_data()
@@ -348,9 +348,9 @@ def predict(req: PredictRequest):
         escalation_flag = req.escalation_flag if req.escalation_flag is not None else (int(call["escalation_flag"]) if call is not None else 0)
         resolution_flag = req.resolution_flag if req.resolution_flag is not None else (int(call["resolution_flag"]) if call is not None else 1)
 
-        raw = build_raw_features(customer, qa_score, sentiment, emotion_frustration,
-                                 emotion_anger, sentiment_shift, escalation_flag, resolution_flag)
-        csv_row = encode_row(raw)
+        raw = build_raw_features(customer=customer, qa_score=qa_score, sentiment=sentiment, emotion_frustration=emotion_frustration,
+                                 emotion_anger=emotion_anger, sentiment_shift=sentiment_shift, escalation_flag=escalation_flag, resolution_flag=resolution_flag)
+        csv_row = encode_row(raw=raw)
 
         response = sagemaker_runtime.invoke_endpoint(
             EndpointName=ENDPOINT_NAME,
@@ -364,7 +364,7 @@ def predict(req: PredictRequest):
 
         return PredictResponse(
             customer_id=req.customer_id,
-            churn_probability=round(proba, 4),
+            churn_probability=round(number=proba, ndigits=4),
             prediction=prediction,
             risk_level=risk_level,
             has_call_data=has_call or req.qa_score is not None,
@@ -380,97 +380,4 @@ def predict(req: PredictRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# --- Transcribe Pipeline Routes ---
-transcribe_client = boto3.client("transcribe", region_name=REGION)
-
-
-@app.post("/transcribe")
-async def upload_audio(file: UploadFile = File(...)):
-    """Upload an audio file to S3 audio/ prefix.
-    The Lambda trigger will automatically start a Transcribe job."""
-    allowed_ext = {".wav", ".mp3", ".mp4", ".flac"}
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in allowed_ext:
-        raise HTTPException(status_code=400, detail=f"Unsupported format: {ext}. Use: {', '.join(allowed_ext)}")
-
-    s3_key = f"audio/{file.filename}"
-    logger.info(f"Uploading audio: {s3_key}")
-
-    contents = await file.read()
-    s3.put_object(Bucket=S3_BUCKET, Key=s3_key, Body=contents)
-
-    return {
-        "status": "uploaded",
-        "s3_key": s3_key,
-        "filename": file.filename,
-        "message": "Transcription job will start automatically via Lambda trigger.",
-    }
-
-
-@app.get("/transcripts")
-def list_transcripts():
-    """List all completed transcripts in S3 transcripts/ prefix."""
-    try:
-        resp = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix="transcripts/")
-        transcripts = []
-        for obj in resp.get("Contents", []):
-            key = obj["Key"]
-            if key.endswith(".json"):
-                name = os.path.basename(key).replace(".json", "")
-                transcripts.append({
-                    "name": name,
-                    "key": key,
-                    "size": obj["Size"],
-                    "last_modified": obj["LastModified"].isoformat(),
-                })
-        transcripts.sort(key=lambda x: x["last_modified"], reverse=True)
-        return transcripts
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/transcripts/{filename}")
-def get_transcript(filename: str):
-    """Retrieve a specific transcript and return the text + speaker segments."""
-    s3_key = f"transcripts/{filename}.json"
-    try:
-        obj = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
-        result = json.loads(obj["Body"].read().decode())
-
-        full_text = result["results"]["transcripts"][0]["transcript"]
-
-        # Build speaker segments from top-level items (which have both
-        # speaker_label and alternatives with text content)
-        segments = []
-        items = result["results"].get("items", [])
-        if items and items[0].get("speaker_label"):
-            current_speaker = None
-            current_words = []
-            for item in items:
-                speaker = item.get("speaker_label", current_speaker)
-                word = item["alternatives"][0]["content"] if item.get("alternatives") else ""
-                if speaker != current_speaker and current_words:
-                    segments.append({"speaker": current_speaker, "text": " ".join(current_words)})
-                    current_words = []
-                current_speaker = speaker
-                if word:
-                    if item.get("type") == "punctuation" and current_words:
-                        current_words[-1] += word
-                    else:
-                        current_words.append(word)
-            if current_words:
-                segments.append({"speaker": current_speaker, "text": " ".join(current_words)})
-
-        return {
-            "filename": filename,
-            "transcript": full_text,
-            "segments": segments,
-            "job_name": result.get("jobName", ""),
-        }
-    except s3.exceptions.NoSuchKey:
-        raise HTTPException(status_code=404, detail=f"Transcript '{filename}' not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(object=e))

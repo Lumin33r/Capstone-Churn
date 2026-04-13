@@ -4,15 +4,15 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: qa-evaluator-service
+  name: sentiment-predictor-service
   namespace: retention-engine
   labels:
-    app: qa-evaluator
+    app: sentiment-predictor
 spec:
   selector:
-    app: qa-evaluator
+    app: sentiment-predictor
   ports:
     - protocol: TCP
-      port: 8000
-      targetPort: 8000
+      port: 8001
+      targetPort: 8001
   type: ClusterIP
