@@ -22,7 +22,7 @@ def analyze_call(transcript: str) -> str:
     """
     try:
         response = httpx.post(
-            url=f"{SENTIMENT_URL}/predict",
+            url=f"{SENTIMENT_URL}/sentiment",
             json={"text": transcript},
             timeout=30.0,
         )
