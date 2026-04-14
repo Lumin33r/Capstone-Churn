@@ -688,6 +688,7 @@ Also automated ALB controller Helm install as a post-apply step in `terraform.ym
 **LLM analysis:** The ALB Ingress had a `ingress.k8s.aws/resources` finalizer that blocks deletion until the ALB controller confirms the AWS resources (ALB, target groups, listeners) are cleaned up. Since the controller was being deleted in the same teardown, nothing was there to clear the finalizer.
 
 **LLM fix:** Updated `teardown.yml` to:
+
 1. Delete ingress with `--timeout=120s`
 2. If timeout, force-remove the finalizer with `kubectl patch --type=json -p='[{"op": "remove", "path": "/metadata/finalizers"}]'`
 3. Capture ALB hostname before deletion, then poll AWS until the actual ALB is gone
@@ -702,15 +703,15 @@ Also automated ALB controller Helm install as a post-apply step in `terraform.ym
 
 **LLM actions:** Imported 7 resources across multiple CI runs:
 
-| Resource | Import ID | Why Missing |
-|----------|-----------|-------------|
-| `aws_iam_openid_connect_provider.eks` | Full ARN | Created by teammate's script, never in TF |
-| `aws_iam_policy.alb_controller` | Policy ARN | Created by previous apply, state lost |
-| `aws_iam_role.alb_controller` | Role name | Same — partial apply |
-| `aws_iam_role.transcribe_lambda_role` | Role name | Created by Kathleen's PR, never in TF |
-| `aws_lambda_function.transcribe_pipeline` | Function name | Partial apply created it, then errored on `AWS_REGION` |
-| `aws_lambda_permission.allow_s3_invoke` | `function/statement_id` | Partial apply created it, next run couldn't |
-| `aws_s3_bucket_notification.audio_upload_trigger` | Bucket name | Same pattern |
+| Resource                                          | Import ID               | Why Missing                                            |
+| ------------------------------------------------- | ----------------------- | ------------------------------------------------------ |
+| `aws_iam_openid_connect_provider.eks`             | Full ARN                | Created by teammate's script, never in TF              |
+| `aws_iam_policy.alb_controller`                   | Policy ARN              | Created by previous apply, state lost                  |
+| `aws_iam_role.alb_controller`                     | Role name               | Same — partial apply                                   |
+| `aws_iam_role.transcribe_lambda_role`             | Role name               | Created by Kathleen's PR, never in TF                  |
+| `aws_lambda_function.transcribe_pipeline`         | Function name           | Partial apply created it, then errored on `AWS_REGION` |
+| `aws_lambda_permission.allow_s3_invoke`           | `function/statement_id` | Partial apply created it, next run couldn't            |
+| `aws_s3_bucket_notification.audio_upload_trigger` | Bucket name             | Same pattern                                           |
 
 **My evaluation:** Each import was necessary — the resources genuinely existed in AWS. The root cause was partial applies: Terraform creates resource A, then fails on resource B, but only records A in state if the apply step completes. Since CI uses `tfplan` files and the apply step fails, nothing gets recorded.
 
@@ -809,21 +810,208 @@ Also automated ALB controller Helm install as a post-apply step in `terraform.ym
 
 ## Running List of Changes (Session 2 — April 11, 2026)
 
+| Commit    | File(s)                                                                                                                          | Change                                                                           |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `447a007` | `terraform/alb-controller.tf`, `k8s/ingress.yaml`, `k8s/services/frontend-service.yaml`, `scripts/install-alb-controller.sh`     | ALB Ingress architecture — single ALB replaces per-service LoadBalancers         |
+| `232ab88` | `frontend/nginx.conf`, `frontend/Dockerfile`, `k8s/configmaps/agent-config.yaml`, `k8s/deployments/qa-evaluator-deployment.yaml` | Nginx reverse proxy, correct service URLs, SageMaker endpoint name               |
+| `71667b2` | `services/agent-service/chains/churn_analysis.py`, `requirements.txt`                                                            | ChatBedrock `model=` → `model_id=`, `region=` → `region_name=`, pin pydantic<2.0 |
+| `f083df9` | `terraform/alb-controller.tf`                                                                                                    | Add DescribeListenerAttributes IAM permission                                    |
+| `6492fe0` | `.github/workflows/deploy.yml`, `.github/workflows/terraform.yml`                                                                | Correct deploy summary URLs, default terraform env to dev on PR                  |
+| `577fb7e` | `terraform/alb-controller.tf`, `k8s/ingress.yaml`                                                                                | Revert Copilot review suggestions that broke working config                      |
+| `a5fc0fb` | `.github/workflows/teardown.yml`                                                                                                 | Safe teardown workflow with scope options and safety gate                        |
+| `9c4be1e` | `.github/workflows/terraform.yml`                                                                                                | Automate ALB controller Helm install as post-apply step                          |
+| `e87d2df` | `.github/workflows/teardown.yml`                                                                                                 | Remove OIDC provider from teardown targets to preserve IRSA                      |
+| `0d0ac6a` | `.github/workflows/terraform.yml`                                                                                                | Gate ALB install to dev env, derive cluster name from kubeconfig                 |
+| `9ba54f3` | `terraform/transcribe.tf`                                                                                                        | Add description to transcribe_lambda_role to match AWS                           |
+| `3e802da` | `.github/workflows/teardown.yml`                                                                                                 | Handle stuck ingress finalizer with timeout + force-remove                       |
+| `bd4269c` | `terraform/transcribe.tf`                                                                                                        | Remove reserved `AWS_REGION` env var from Lambda config                          |
+| `a26a02e` | `.github/workflows/terraform.yml`                                                                                                | Extract short cluster name from ARN for Helm install                             |
+| `36e1c7b` | `.github/workflows/deploy.yml`                                                                                                   | Add DNS resolution wait before ALB smoke test                                    |
+| `6ff4bcb` | All 5 workflow files                                                                                                             | Move `AWS_REGION` from secrets to vars to prevent URL masking                    |
+
+---
+
+## Session 3 — April 13, 2026
+
+### 46. CI Post-Merge Path Fix — `sentiment-predictor-api` → `sentiment-analysis-api`
+
+**What I asked:** `ci-post-merge.yml` failed with `cd services/sentiment-predictor-api: No such file or directory`. Fix it.
+
+**LLM analysis:** The workflow matrix referenced `services/sentiment-predictor-api` in two places (unit-tests and docker-build-check jobs), but the actual directory is `services/sentiment-analysis-api`.
+
+**LLM fix:** Updated both matrix entries in `ci-post-merge.yml` from `sentiment-predictor-api` to `sentiment-analysis-api`.
+
+**My evaluation:** Straightforward path mismatch. The directory was likely renamed at some point and the workflow wasn't updated.
+
+---
+
+### 47. Terraform State Imports — 6 Pre-Existing AWS Resources
+
+**What I asked:** `terraform apply` failed with "already exists" errors on multiple resources. Import them.
+
+**LLM actions:**
+
+1. Ran `terraform init -upgrade` to update provider lock (5.100.0 → 6.40.0)
+2. Imported 6 resources into Terraform state:
+
+| Resource                                        | Import ID                       | Notes                                                  |
+| ----------------------------------------------- | ------------------------------- | ------------------------------------------------------ |
+| `aws_bedrockagent_agent.bedrock_agent`          | `GOKJIPPKQW`                    | Bedrock Agent                                          |
+| `aws_bedrock_guardrail.sentiment_guardrail`     | `p5vveaor3pg2,DRAFT`            | Required `guardrail_id,DRAFT` format                   |
+| `aws_bedrockagent_agent_alias.bedrock_endpoint` | `S9NJTXGPP1,GOKJIPPKQW`         | Required `alias_id,agent_id` (not `agent_id,alias_id`) |
+| `aws_eks_cluster.main`                          | `eks-ezvrmopo-okl`              | EKS cluster                                            |
+| `aws_eks_node_group.main`                       | `eks-ezvrmopo-okl:retention-ng` | EKS node group                                         |
+| `aws_iam_role.eks_cluster_role`                 | `eks-cluster-role`              | IAM role                                               |
+| `aws_iam_role.eks_node_role`                    | `eks-node-role`                 | IAM role                                               |
+
+3. Fixed Bedrock Agent role replacement: the associated IAM role had been deleted from AWS, causing the agent to force-replace (blocked by active aliases). Fixed by doing a targeted apply of just the role first.
+4. Force-unlocked a stale state lock: `terraform force-unlock -force b9b8377b-...`
+
+**Result:** `terraform plan` returned **No changes** — state fully in sync.
+
+**My evaluation:** Tedious but necessary. The Bedrock alias import format (`alias_id,agent_id`) was counterintuitive — had to reverse the order after the first attempt failed. The targeted role apply to prevent agent replacement was a good strategy.
+
+---
+
+### 48. SageMaker Sentiment Endpoint — git-lfs Pointer File in Model Tar
+
+**What I asked:** The sentiment endpoint was failing. Investigate and fix.
+
+**LLM analysis:** `pytorch_model.bin` was 134 bytes — a git-lfs pointer file instead of the real 256MB model weights. The `model.tar.gz` uploaded to S3 contained the pointer, so SageMaker was loading garbage.
+
+**LLM fix (multi-step):**
+
+1. Installed `git-lfs` and ran `git lfs pull` to download the real 256MB weights
+2. Repackaged `model.tar.gz` with the correct binary
+3. Re-uploaded to `s3://retention-engine-bucket/models/sentiment/model.tar.gz`
+4. Deleted and recreated the SageMaker model + endpoint config to force the new tar
+5. Triggered endpoint update
+
+**My evaluation:** Root cause correctly identified. The LFS pointer issue is a common CI trap — any checkout without `lfs: true` produces broken model files.
+
+---
+
+### 49. Prevent Future LFS Pointer Deployments
+
+**What I asked:** The workflow kept re-deploying the broken model because `sagemaker-deploy.yml` didn't pull LFS files. Harden the pipeline.
+
+**LLM fixes (3 changes):**
+
+1. **`sagemaker-deploy.yml`** — Added `lfs: true` to the `actions/checkout@v4` step so CI pulls real LFS files
+2. **`sagemaker/sentiment/deploy.py` — LFS guard** — Added a check in `package_model()`: if `pytorch_model.bin` is < 1024 bytes and contains "git-lfs", raise `RuntimeError` immediately instead of packaging a broken tar
+3. **`sagemaker/sentiment/deploy.py` — InService skip** — Added `describe_endpoint` check at the top of `__main__` (matching churn's pattern): InService → exit, Updating/Creating → wait, Failed → redeploy, Not found → create
+
+**My evaluation:** Defense in depth. The LFS checkout prevents the issue at the source, the guard catches it if checkout fails, and the InService skip avoids unnecessary redeployments.
+
+---
+
+### 50. deploy.yml Docker Build Path Fix — Same `sentiment-predictor-api` Bug
+
+**What I asked:** `docker/build-push-action@v5` failed with `path "services/sentiment-predictor-api" not found` in `deploy.yml`.
+
+**LLM fix:** Updated `deploy.yml` matrix `context` from `services/sentiment-predictor-api` to `services/sentiment-analysis-api`. Same root cause as Task 46 — the path was wrong in a different workflow file.
+
+**My evaluation:** Consistent fix across all workflows. This was the last occurrence of the old directory name.
+
+---
+
+## Instances Where I Provided Guidance (Session 3)
+
+### 8. Terraform Import Order
+
+**Situation:** The Bedrock Agent kept showing force-replacement because its IAM role was deleted from AWS.
+**My process:** The LLM identified the missing role as the root cause and proposed a targeted `terraform apply -target` to recreate just the role before the full apply. I confirmed this approach rather than deleting the agent alias (which would have caused downtime).
+
+### 9. InService Skip Pattern
+
+**Situation:** The sentiment `deploy.py` lacked the InService skip that churn's deploy.py already had.
+**My decision:** Told the LLM to match the churn pattern exactly — same status checks, same waiter config, same exit behavior. Consistency across both deploy scripts makes maintenance easier.
+
+---
+
+## Running List of Changes (Session 3 — April 13, 2026)
+
+| Commit    | File(s)                                                                   | Change                                                                                           |
+| --------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `93fb460` | `.github/workflows/ci-post-merge.yml`                                     | Fix `sentiment-predictor-api` → `sentiment-analysis-api` in unit-tests and docker-build matrices |
+| `25c4758` | `.github/workflows/sagemaker-deploy.yml`, `sagemaker/sentiment/deploy.py` | Add `lfs: true` to checkout; add LFS guard + InService skip to sentiment deploy.py               |
+| `86e44e6` | `sagemaker/sentiment/deploy.py`                                           | Refine InService skip logic and LFS guard in sentiment deploy                                    |
+| `c9f0cdc` | `.github/workflows/deploy.yml`                                            | Fix Docker build context path `sentiment-predictor-api` → `sentiment-analysis-api`               |
+
+**Terraform state changes (not committed — remote S3 state):**
+
+- Imported 6 resources: Bedrock Agent, Bedrock Guardrail, Bedrock Agent Alias, EKS Cluster, EKS Node Group, 2 IAM Roles
+- Targeted apply to recreate deleted Bedrock IAM role
+- Force-unlocked stale state lock
+- Final state: fully in sync, `terraform plan` shows no changes
+
+**SageMaker manual operations:**
+
+- Re-uploaded correct `model.tar.gz` (256MB real weights) to S3
+- Deleted and recreated SageMaker model + endpoint config
+- Triggered endpoint update with correct model artifacts
+
+---
+
+### 51. deploy-to-eks Rollout Failures — 3 Pod Issues
+
+**What I asked:** `deploy.yml` deploy-to-eks job was stuck on "Wait for rollout" — `sentiment-predictor` showing "0 out of 1 new replicas have been updated". Troubleshoot.
+
+**LLM analysis:** Ran `kubectl get pods` and `kubectl logs` to diagnose. Found 3 distinct issues:
+
+| Pod                                                  | Status             | Root Cause                                                                                                           |
+| ---------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `sentiment-predictor`                                | `CrashLoopBackOff` | `requirements.txt` only had `fastapi` + `uvicorn` — missing `pandas`, `boto3`, `python-dotenv` that `app.py` imports |
+| `frontend-deployment`                                | `CrashLoopBackOff` | nginx config referenced `sentiment-service:8080` but K8s service is `sentiment-predictor-service:8001`               |
+| `backend-deployment`, `sentiment-wrapper-deployment` | `ImagePullBackOff` | No Docker images in GHCR — orphan manifests re-introduced by Okino's merge (PR #66)                                  |
+
+**LLM fixes:**
+
+1. **`services/sentiment-analysis-api/requirements.txt`** — Added `pandas`, `boto3`, `python-dotenv` to match `app.py` imports
+2. **`frontend/nginx.conf`** — Changed `proxy_pass http://sentiment-service:8080/` → `proxy_pass http://sentiment-predictor-service:8001/` to match the actual K8s service name and port
+3. **Deleted 4 orphan manifests** — `k8s/deployments/backend-deployment.yaml`, `k8s/deployments/sentiment-wrapper-deployment.yaml`, `k8s/services/backend-service.yaml`, `k8s/services/sentiment-wrapper-service.yaml`
+4. **Cleaned live cluster** — `kubectl delete deployment/service` for the orphans to free pod quota immediately
+
+**My evaluation:** Good systematic diagnosis — checked pods, pulled logs, cross-referenced service names. The `requirements.txt` being incomplete was Okino's oversight (the Dockerfile installs from it but the file only had the web framework). The orphan manifests were previously removed in Session 2 (Task 33) but came back via PR #66 merge. The nginx upstream mismatch was introduced when the service was renamed from `sentiment-service` to `sentiment-predictor-service` without updating the nginx config.
+
+---
+
+## Running List of Changes (Session 3 continued)
+
+| Commit    | File(s)                                                                                            | Change                                                        |
+| --------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `b937d94` | `services/sentiment-analysis-api/requirements.txt`, `frontend/nginx.conf`, 4 deleted K8s manifests | Add missing deps, fix nginx upstream, remove orphan manifests |
+
+**Cluster operations:**
+
+- Deleted `backend-deployment` and `sentiment-wrapper-deployment` from live cluster
+- Deleted `backend-service` and `sentiment-wrapper-service` from live cluster
+- Freed pod quota for `sentiment-predictor` rollout
+
+---
+
+### 52. Sentiment-Predictor Rollout Stuck — Probe Port Mismatch
+
+**What I asked:** The deploy-to-eks rollout was at 3m 33s with `sentiment-predictor` still showing "1 old replicas are pending termination". Is this taking too long?
+
+**LLM analysis:** Ran `kubectl get pods` — the new pod was `Running` but `0/1` Ready with 4 restarts. Logs showed uvicorn started successfully on port 8001. Checked the deployment's readiness probe — it was hitting **port 8000**, but the container listens on **port 8001** (per `Dockerfile` CMD: `uvicorn app:app --port 8001`). The probe would never pass, so K8s kept restarting the container.
+
+All 3 port references in `sentiment-predictor-deployment.yaml` were wrong:
+- `containerPort: 8000` → `8001`
+- `readinessProbe.port: 8000` → `8001`
+- `livenessProbe.port: 8000` → `8001`
+
+**LLM fix:** Updated all 3 port references to 8001, applied directly to the cluster with `kubectl apply`, and pushed to `bugs/workflow`.
+
+**My evaluation:** Quick diagnosis. The app was healthy — it was purely the probe configuration pointing to the wrong port. This was likely a copy-paste from another deployment manifest that uses port 8000.
+
+---
+
+## Running List of Changes (Session 3 continued)
+
 | Commit | File(s) | Change |
 |--------|---------|--------|
-| `447a007` | `terraform/alb-controller.tf`, `k8s/ingress.yaml`, `k8s/services/frontend-service.yaml`, `scripts/install-alb-controller.sh` | ALB Ingress architecture — single ALB replaces per-service LoadBalancers |
-| `232ab88` | `frontend/nginx.conf`, `frontend/Dockerfile`, `k8s/configmaps/agent-config.yaml`, `k8s/deployments/qa-evaluator-deployment.yaml` | Nginx reverse proxy, correct service URLs, SageMaker endpoint name |
-| `71667b2` | `services/agent-service/chains/churn_analysis.py`, `requirements.txt` | ChatBedrock `model=` → `model_id=`, `region=` → `region_name=`, pin pydantic<2.0 |
-| `f083df9` | `terraform/alb-controller.tf` | Add DescribeListenerAttributes IAM permission |
-| `6492fe0` | `.github/workflows/deploy.yml`, `.github/workflows/terraform.yml` | Correct deploy summary URLs, default terraform env to dev on PR |
-| `577fb7e` | `terraform/alb-controller.tf`, `k8s/ingress.yaml` | Revert Copilot review suggestions that broke working config |
-| `a5fc0fb` | `.github/workflows/teardown.yml` | Safe teardown workflow with scope options and safety gate |
-| `9c4be1e` | `.github/workflows/terraform.yml` | Automate ALB controller Helm install as post-apply step |
-| `e87d2df` | `.github/workflows/teardown.yml` | Remove OIDC provider from teardown targets to preserve IRSA |
-| `0d0ac6a` | `.github/workflows/terraform.yml` | Gate ALB install to dev env, derive cluster name from kubeconfig |
-| `9ba54f3` | `terraform/transcribe.tf` | Add description to transcribe_lambda_role to match AWS |
-| `3e802da` | `.github/workflows/teardown.yml` | Handle stuck ingress finalizer with timeout + force-remove |
-| `bd4269c` | `terraform/transcribe.tf` | Remove reserved `AWS_REGION` env var from Lambda config |
-| `a26a02e` | `.github/workflows/terraform.yml` | Extract short cluster name from ARN for Helm install |
-| `36e1c7b` | `.github/workflows/deploy.yml` | Add DNS resolution wait before ALB smoke test |
-| `6ff4bcb` | All 5 workflow files | Move `AWS_REGION` from secrets to vars to prevent URL masking |
+| `a293599` | `k8s/deployments/sentiment-predictor-deployment.yaml` | Fix probe and containerPort from 8000 → 8001 |
+
+**Cluster operations:**
+- Applied updated deployment directly to cluster for immediate effect

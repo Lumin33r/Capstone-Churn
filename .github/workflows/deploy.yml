@@ -53,7 +53,7 @@ jobs:
           - name: churn-predictor
             context: services/churn-predictor-api
           - name: sentiment-predictor
-            context: services/sentiment-predictor-api
+            context: services/sentiment-analysis-api
           - name: frontend
             context: frontend
     steps:

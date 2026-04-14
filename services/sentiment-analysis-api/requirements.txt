@@ -1,5 +1,8 @@
 fastapi==0.115.0
 uvicorn==0.30.6
+pandas
+boto3
+python-dotenv
 
 
 
