@@ -827,3 +827,123 @@ Also automated ALB controller Helm install as a post-apply step in `terraform.ym
 | `a26a02e` | `.github/workflows/terraform.yml` | Extract short cluster name from ARN for Helm install |
 | `36e1c7b` | `.github/workflows/deploy.yml` | Add DNS resolution wait before ALB smoke test |
 | `6ff4bcb` | All 5 workflow files | Move `AWS_REGION` from secrets to vars to prevent URL masking |
+
+---
+
+## Session 3 — April 13, 2026
+
+### 46. CI Post-Merge Path Fix — `sentiment-predictor-api` → `sentiment-analysis-api`
+
+**What I asked:** `ci-post-merge.yml` failed with `cd services/sentiment-predictor-api: No such file or directory`. Fix it.
+
+**LLM analysis:** The workflow matrix referenced `services/sentiment-predictor-api` in two places (unit-tests and docker-build-check jobs), but the actual directory is `services/sentiment-analysis-api`.
+
+**LLM fix:** Updated both matrix entries in `ci-post-merge.yml` from `sentiment-predictor-api` to `sentiment-analysis-api`.
+
+**My evaluation:** Straightforward path mismatch. The directory was likely renamed at some point and the workflow wasn't updated.
+
+---
+
+### 47. Terraform State Imports — 6 Pre-Existing AWS Resources
+
+**What I asked:** `terraform apply` failed with "already exists" errors on multiple resources. Import them.
+
+**LLM actions:**
+
+1. Ran `terraform init -upgrade` to update provider lock (5.100.0 → 6.40.0)
+2. Imported 6 resources into Terraform state:
+
+| Resource | Import ID | Notes |
+|----------|-----------|-------|
+| `aws_bedrockagent_agent.bedrock_agent` | `GOKJIPPKQW` | Bedrock Agent |
+| `aws_bedrock_guardrail.sentiment_guardrail` | `p5vveaor3pg2,DRAFT` | Required `guardrail_id,DRAFT` format |
+| `aws_bedrockagent_agent_alias.bedrock_endpoint` | `S9NJTXGPP1,GOKJIPPKQW` | Required `alias_id,agent_id` (not `agent_id,alias_id`) |
+| `aws_eks_cluster.main` | `eks-ezvrmopo-okl` | EKS cluster |
+| `aws_eks_node_group.main` | `eks-ezvrmopo-okl:retention-ng` | EKS node group |
+| `aws_iam_role.eks_cluster_role` | `eks-cluster-role` | IAM role |
+| `aws_iam_role.eks_node_role` | `eks-node-role` | IAM role |
+
+3. Fixed Bedrock Agent role replacement: the associated IAM role had been deleted from AWS, causing the agent to force-replace (blocked by active aliases). Fixed by doing a targeted apply of just the role first.
+4. Force-unlocked a stale state lock: `terraform force-unlock -force b9b8377b-...`
+
+**Result:** `terraform plan` returned **No changes** — state fully in sync.
+
+**My evaluation:** Tedious but necessary. The Bedrock alias import format (`alias_id,agent_id`) was counterintuitive — had to reverse the order after the first attempt failed. The targeted role apply to prevent agent replacement was a good strategy.
+
+---
+
+### 48. SageMaker Sentiment Endpoint — git-lfs Pointer File in Model Tar
+
+**What I asked:** The sentiment endpoint was failing. Investigate and fix.
+
+**LLM analysis:** `pytorch_model.bin` was 134 bytes — a git-lfs pointer file instead of the real 256MB model weights. The `model.tar.gz` uploaded to S3 contained the pointer, so SageMaker was loading garbage.
+
+**LLM fix (multi-step):**
+
+1. Installed `git-lfs` and ran `git lfs pull` to download the real 256MB weights
+2. Repackaged `model.tar.gz` with the correct binary
+3. Re-uploaded to `s3://retention-engine-bucket/models/sentiment/model.tar.gz`
+4. Deleted and recreated the SageMaker model + endpoint config to force the new tar
+5. Triggered endpoint update
+
+**My evaluation:** Root cause correctly identified. The LFS pointer issue is a common CI trap — any checkout without `lfs: true` produces broken model files.
+
+---
+
+### 49. Prevent Future LFS Pointer Deployments
+
+**What I asked:** The workflow kept re-deploying the broken model because `sagemaker-deploy.yml` didn't pull LFS files. Harden the pipeline.
+
+**LLM fixes (3 changes):**
+
+1. **`sagemaker-deploy.yml`** — Added `lfs: true` to the `actions/checkout@v4` step so CI pulls real LFS files
+2. **`sagemaker/sentiment/deploy.py` — LFS guard** — Added a check in `package_model()`: if `pytorch_model.bin` is < 1024 bytes and contains "git-lfs", raise `RuntimeError` immediately instead of packaging a broken tar
+3. **`sagemaker/sentiment/deploy.py` — InService skip** — Added `describe_endpoint` check at the top of `__main__` (matching churn's pattern): InService → exit, Updating/Creating → wait, Failed → redeploy, Not found → create
+
+**My evaluation:** Defense in depth. The LFS checkout prevents the issue at the source, the guard catches it if checkout fails, and the InService skip avoids unnecessary redeployments.
+
+---
+
+### 50. deploy.yml Docker Build Path Fix — Same `sentiment-predictor-api` Bug
+
+**What I asked:** `docker/build-push-action@v5` failed with `path "services/sentiment-predictor-api" not found` in `deploy.yml`.
+
+**LLM fix:** Updated `deploy.yml` matrix `context` from `services/sentiment-predictor-api` to `services/sentiment-analysis-api`. Same root cause as Task 46 — the path was wrong in a different workflow file.
+
+**My evaluation:** Consistent fix across all workflows. This was the last occurrence of the old directory name.
+
+---
+
+## Instances Where I Provided Guidance (Session 3)
+
+### 8. Terraform Import Order
+
+**Situation:** The Bedrock Agent kept showing force-replacement because its IAM role was deleted from AWS.
+**My process:** The LLM identified the missing role as the root cause and proposed a targeted `terraform apply -target` to recreate just the role before the full apply. I confirmed this approach rather than deleting the agent alias (which would have caused downtime).
+
+### 9. InService Skip Pattern
+
+**Situation:** The sentiment `deploy.py` lacked the InService skip that churn's deploy.py already had.
+**My decision:** Told the LLM to match the churn pattern exactly — same status checks, same waiter config, same exit behavior. Consistency across both deploy scripts makes maintenance easier.
+
+---
+
+## Running List of Changes (Session 3 — April 13, 2026)
+
+| Commit | File(s) | Change |
+|--------|---------|--------|
+| `93fb460` | `.github/workflows/ci-post-merge.yml` | Fix `sentiment-predictor-api` → `sentiment-analysis-api` in unit-tests and docker-build matrices |
+| `25c4758` | `.github/workflows/sagemaker-deploy.yml`, `sagemaker/sentiment/deploy.py` | Add `lfs: true` to checkout; add LFS guard + InService skip to sentiment deploy.py |
+| `86e44e6` | `sagemaker/sentiment/deploy.py` | Refine InService skip logic and LFS guard in sentiment deploy |
+| `c9f0cdc` | `.github/workflows/deploy.yml` | Fix Docker build context path `sentiment-predictor-api` → `sentiment-analysis-api` |
+
+**Terraform state changes (not committed — remote S3 state):**
+- Imported 6 resources: Bedrock Agent, Bedrock Guardrail, Bedrock Agent Alias, EKS Cluster, EKS Node Group, 2 IAM Roles
+- Targeted apply to recreate deleted Bedrock IAM role
+- Force-unlocked stale state lock
+- Final state: fully in sync, `terraform plan` shows no changes
+
+**SageMaker manual operations:**
+- Re-uploaded correct `model.tar.gz` (256MB real weights) to S3
+- Deleted and recreated SageMaker model + endpoint config
+- Triggered endpoint update with correct model artifacts
