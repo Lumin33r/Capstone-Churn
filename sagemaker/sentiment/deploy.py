@@ -165,6 +165,17 @@ def package_model(tar_path: str) -> str:
     """Package model artifacts into a tar.gz for SageMaker."""
     validate_model_artifacts()
 
+    # Guard against git-lfs pointer files
+    bin_path = os.path.join(SCRIPT_DIR, "model/pytorch_model.bin")
+    if os.path.isfile(bin_path) and os.path.getsize(bin_path) < 1024:
+        with open(bin_path, "r") as f:
+            head = f.read(40)
+        if "git-lfs" in head:
+            raise RuntimeError(
+                f"{bin_path} is a git-lfs pointer ({os.path.getsize(bin_path)} bytes). "
+                "Run 'git lfs pull' or enable lfs in checkout before packaging."
+            )
+
     if not os.path.exists(path="exported_model"):
         os.makedirs(name=f"{SCRIPT_DIR}/exported_model", exist_ok=True)
 
