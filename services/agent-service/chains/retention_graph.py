@@ -16,6 +16,7 @@ from tools.sentiment_tool import analyze_call
 from tools.churn_tool import predict_churn
 from tools.high_risk_tool import get_high_risk_customers
 from tools.customer_tool import get_customer_details
+from tools.transcript_tool import get_transcripts
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -31,9 +32,12 @@ When a user asks about a customer:
 2. ALWAYS call predict_churn to get their churn probability and risk level
 3. If a transcript is provided, call analyze_call for sentiment analysis
 4. If asked about high-risk customers, call get_high_risk_customers
+5. If asked about a customer's call history or transcripts, call get_transcripts
 
 You MUST call tools to gather data. Do not try to answer without data.
-After gathering data, summarize what you found factually — do not make recommendations yet."""
+After gathering data, provide ONLY a brief factual summary of the data you collected.
+DO NOT recommend actions, DO NOT suggest retention strategies, DO NOT provide analysis.
+Just state the facts — the Retention Strategist will handle recommendations."""
 
 STRATEGIST_PROMPT = """You are the Retention Strategist for TriLink Telecom.
 You receive customer data and churn analysis from the Data Gathering Agent.
@@ -73,9 +77,24 @@ class RetentionState(TypedDict):
 
 # ── LLM + Tools ──────────────────────────────────────────────────────
 
-tools = [get_customer_details, analyze_call, predict_churn, get_high_risk_customers]
+tools = [get_customer_details, analyze_call, predict_churn, get_high_risk_customers, get_transcripts]
+
+# Bedrock Guardrail — tuned for retention engine use case
+# Allows discussion of customer frustration/churn while blocking hate, PII, etc.
+# Uses retention-engine-guardrail (not sentiment-analysis-guardrail which was too strict)
+GUARDRAIL_ID = os.getenv("BEDROCK_GUARDRAIL_ID", "nvruz8wx5q83")
+GUARDRAIL_VERSION = os.getenv("BEDROCK_GUARDRAIL_VERSION", "DRAFT")
 
 llm = ChatBedrock(
+    model_id=MODEL_ID,
+    region_name=AWS_REGION,
+    model_kwargs={"max_tokens": 1024, "temperature": 0},
+    guardrails={"guardrailIdentifier": GUARDRAIL_ID, "guardrailVersion": GUARDRAIL_VERSION},
+)
+
+# Strategist LLM — no guardrail, since it produces retention recommendations
+# that contain terms (cancel, churn, frustrated) the guardrail would block
+llm_strategist = ChatBedrock(
     model_id=MODEL_ID,
     region_name=AWS_REGION,
     model_kwargs={"max_tokens": 1024, "temperature": 0},
@@ -117,7 +136,10 @@ def classify_request(state: RetentionState) -> RetentionState:
 def call_model(state: RetentionState) -> RetentionState:
     """Data Gathering Agent — calls tools to collect customer data."""
     system = SystemMessage(content=GATHERER_PROMPT)
-    response = llm_with_tools.invoke([system] + state["messages"])
+    response = llm_with_tools.invoke(
+        [system] + state["messages"],
+        config={"run_name": "DataGatherer"},
+    )
     return {"messages": [response], "request_type": state["request_type"],
             "customer_id": state.get("customer_id"), "has_transcript": state.get("has_transcript", False)}
 
@@ -125,16 +147,25 @@ def call_model(state: RetentionState) -> RetentionState:
 def handle_tool_response(state: RetentionState) -> RetentionState:
     """Data Gathering Agent — reviews tool results, may request more tools."""
     system = SystemMessage(content=GATHERER_PROMPT)
-    response = llm_with_tools.invoke([system] + state["messages"])
+    response = llm_with_tools.invoke(
+        [system] + state["messages"],
+        config={"run_name": "DataGatherer-ReviewTools"},
+    )
     return {"messages": [response], "request_type": state["request_type"],
             "customer_id": state.get("customer_id"), "has_transcript": state.get("has_transcript", False)}
 
 
 def strategist(state: RetentionState) -> RetentionState:
     """Retention Strategist — evaluates gathered data and recommends action."""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("[STRATEGIST] Node entered — generating recommendation")
     system = SystemMessage(content=STRATEGIST_PROMPT)
-    # Use base LLM without tools — strategist only reasons, doesn't call tools
-    response = llm.invoke([system] + state["messages"])
+    response = llm_strategist.invoke(
+        [system] + state["messages"],
+        config={"run_name": "RetentionStrategist"},
+    )
+    logger.info(f"[STRATEGIST] Response generated: {response.content[:100]}...")
     return {"messages": [response], "request_type": state["request_type"],
             "customer_id": state.get("customer_id"), "has_transcript": state.get("has_transcript", False)}
 
@@ -203,6 +234,7 @@ def build_retention_graph():
 # ── Singleton ─────────────────────────────────────────────────────────
 
 _graph = None
+_graph_version = 3  # bump this to force rebuild after code changes
 
 
 def get_graph():

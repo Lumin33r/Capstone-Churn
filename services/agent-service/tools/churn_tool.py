@@ -26,7 +26,7 @@ def predict_churn(
     The tool looks up account data internally by customer_id.
 
     Args:
-        customer_id: The customer ID (e.g., C00077940)
+        customer_id: The customer ID
         qa_score: Quality score from the call analysis, between 1 and 10
         sentiment: Sentiment from call analysis: Positive, Neutral, or Negative
         emotion_frustration: Frustration score from 0 to 1
