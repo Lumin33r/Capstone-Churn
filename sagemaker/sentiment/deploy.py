@@ -164,10 +164,10 @@ def validate_model_artifacts() -> None:
 def package_model(tar_path: str) -> str:
     """Package model artifacts into a tar.gz for SageMaker."""
     validate_model_artifacts()
-    
+
     if not os.path.exists(path="exported_model"):
         os.makedirs(name=f"{SCRIPT_DIR}/exported_model", exist_ok=True)
-        
+
     print(f"Packaging model to {tar_path}...")
     with tarfile.open(name=tar_path, mode="w:gz") as tr:
         for filepath in MODEL_PATHS:
@@ -203,15 +203,15 @@ def download_s3_folder() -> None:
     s3 = boto3.client("s3", region_name=REGION)
 
     paginator = s3.get_paginator("list_objects_v2")
-    
+
     os.makedirs(name=f"{SCRIPT_DIR}/exported_model", exist_ok=True)
-    
+
     for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=MODEL_PREFIX):
         for obj in page.get("Contents", []):
             s3_key = obj["Key"]
             rel_path = s3_key[len(MODEL_PREFIX):].lstrip("/")
             local_path = os.path.join(os.path.dirname(__file__), rel_path)
-            
+
             s3.download_file(S3_BUCKET, s3_key, local_path)
 
     print("Download complete")
@@ -449,7 +449,7 @@ def test_endpoint() -> None:
         "customer_service_count": 0,
         "customer_issue_history": 0,
     }
-    
+
     with open(file=os.path.join(os.path.dirname(__file__), "call_transcripts.csv")) as f:
         csv_file = csv.DictReader(f)
 
@@ -475,12 +475,36 @@ if __name__ == "__main__":
     parser.add_argument("--delete", action="store_true", help="Delete the endpoint")
     parser.add_argument("--test", action="store_true", help="Test the live endpoint")
     args = parser.parse_args()
-    
+
     if args.delete:
         delete_endpoint()
     elif args.test:
         test_endpoint()
     else:
+        # Skip everything if endpoint is already healthy or in-progress
+        sm = boto3.client("sagemaker", region_name=REGION)
+        try:
+            resp = sm.describe_endpoint(EndpointName=ENDPOINT_NAME)
+            status = resp["EndpointStatus"]
+            if status == "InService":
+                print(f"Endpoint {ENDPOINT_NAME} already InService, skipping redeployment.")
+                print("\nDone! Test with: python deploy.py --test")
+                sm.close()
+                exit(0)
+            if status in ("Updating", "Creating"):
+                print(f"Endpoint {ENDPOINT_NAME} is {status}, waiting for it to finish...")
+                waiter = sm.get_waiter("endpoint_in_service")
+                waiter.wait(EndpointName=ENDPOINT_NAME, WaiterConfig={"Delay": 30, "MaxAttempts": 30})
+                print(f"Endpoint {ENDPOINT_NAME} is now InService!")
+                print("\nDone! Test with: python deploy.py --test")
+                sm.close()
+                exit(0)
+            print(f"Endpoint {ENDPOINT_NAME} exists but status is {status}, redeploying...")
+        except sm.exceptions.ClientError:
+            print(f"Endpoint {ENDPOINT_NAME} not found, creating...")
+        finally:
+            sm.close()
+
         valid_checks()
         tar_path = os.path.join(SCRIPT_DIR, "model.tar.gz")
         package_model(tar_path=tar_path)
