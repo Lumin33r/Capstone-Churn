@@ -1,3 +1,7 @@
+import sys
+print("[FORCE LOG] inference script imported")
+sys.stdout.flush()
+
 import logging
 import torch
 import os
@@ -6,6 +10,7 @@ import json
 import traceback
 import subprocess
 import sys
+import csv
 
 from typing import Any, Dict, Tuple, Literal
 import torch.nn.functional as F
@@ -19,7 +24,7 @@ DEVICE = torch.device(device="cuda" if torch.cuda.is_available() else "cpu")
 
 tokenizer = None
 model = None
-sentiment_schema = None
+
 
 # Emotion / Frustration Helpers
 FRUSTRATION_WORDS = [
@@ -50,23 +55,27 @@ FRUSTRATION_WORDS = [
 
     # emotional intensity
     "nightmare", "hassle", "mess", "terrible", "awful", "stressful",
-    "confusing", "overwhelmed", "exhausted", "sick of this",
+    "confusing", "overwhelmed", "exhausted", "sick of this", "broken"
 
 
     # reliability complaints
     "completely unreliable", "keeps cutting out", "nowhere near",
     "video calls drop", "downloads fail", "signal degradation",
     "keeps going out", "angry", "upset", "frustrated", "ridiculous", "unacceptable",
-    "this is crazy", "i'm tired of", "why do i have to"
+    "this is crazy", "i'm tired of", "why do i have to", "absurd", "problem"
 ]
+
+
 
 ANGRY_WORDS = [
     "rage", "fury", "irritation", "annoyance", "resentment", "outrage", "wrath",
     "frustration", "displeasure", "indignation", "hostility", "aggravation", "exasperation",
     "mad", "furious", "irritated", "annoyed", "upset", "enraged", "livid", "outraged",
     "frustrated", "aggravated", "hostile", "irate", "incensed", "cross", "heated", "angry",
-    "furious", "mad"
+    "infuriated", "resentful", "bitter", "fed up", "pissed", "fuming", "displeased",
+    "boiling", "seething", "exasperated",
 ]
+
 
 EMPATHY_PHRASES = [
     "i understand", "i completely understand", "i hear your frustration", "i hear you",
@@ -87,24 +96,6 @@ EMPATHY_PHRASES = [
 ]
 
 
-def empathy_score(text) -> int:
-    text = text.lower()
-    return sum(text.count(p.lower()) for p in EMPATHY_PHRASES)
-
-def emotion_frustration(text: str) -> int:
-    text = text.lower()
-    return sum(text.count(w) for w in FRUSTRATION_WORDS)
-
-def emotion_anger(text: str) -> int:
-    text = text.lower()
-    return sum(text.count(w) for w in ANGRY_WORDS)
-
-ANGER_WORDS = [
-    "angry", "furious", "mad", "irritated", "annoyed", "outraged", "livid",
-    "enraged", "hostile", "aggravated", "infuriated", "resentful", "bitter",
-    "fed up", "pissed", "upset", "fuming", "displeased", "irate", "cross",
-    "heated", "frustrated", "exasperated", "boiling", "seething"
-]
 
 SADNESS_WORDS = [
     "sad", "unhappy", "depressed", "miserable", "heartbroken", "down",
@@ -126,14 +117,6 @@ DISGUST_WORDS = [
     "abhorrent", "detestable", "loathsome"
 ]
 
-FRUSTRATION_WORDS = [
-    "frustrated", "frustrating", "fed up", "tired of this", "sick of this",
-    "ridiculous", "unacceptable", "absurd", "insane", "hassle", "nightmare",
-    "mess", "problem", "issue", "keeps happening", "nothing works",
-    "never works", "always failing", "constant issues", "ongoing issues",
-    "same problem", "not working", "broken", "slow", "slowing down",
-    "cutting out", "dropping", "intermittent"
-]
 
 BILLING_NEGATIVE_WORDS = [
     "overcharged", "wrong bill", "high bill", "unexpected charges",
@@ -161,7 +144,7 @@ ESCALATION_WORDS = [
 ]
 
 NEGATIVE_WORDS = (
-    ANGER_WORDS +
+    ANGRY_WORDS +
     SADNESS_WORDS +
     FEAR_WORDS +
     DISGUST_WORDS +
@@ -172,21 +155,71 @@ NEGATIVE_WORDS = (
     ESCALATION_WORDS
 )
 
+POSITIVE_WORDS = [
+    "resolved", "fixed", "corrected", "adjusted", "updated",
+    "credited", "refunded", "waived", "removed", "taken care of",
+    "no longer an issue", "issue closed", "all set", "sorted out",
+    "clear now", "explained clearly", "makes sense now",
+    "billing corrected", "charges corrected", "charges removed",
+    "fee waived", "balance updated", "account updated",
+    "problem resolved", "everything looks good",
+    "thank you for fixing this", "appreciate the clarification",
+    "billing is accurate now", "that helps a lot",
+    "this clears things up", "glad this is resolved",
+    "happy with the outcome", "satisfied with the resolution",
 
-def toxicity_score(text) -> float | Literal[0]:
-    if not isinstance(text, str):
-        return 0
-    count = sum(1 for w in NEGATIVE_WORDS if w in text.lower())
-    # Toxicity proxy = negative sentiment intensity
-    return count
+    "helpful", "supportive", "professional", "friendly", "kind",
+    "patient", "polite", "courteous", "understanding",
+    "knowledgeable", "informative", "clear", "responsive",
+    "quick", "efficient", "effective", "reliable",
+    "great service", "excellent service", "amazing help",
+    "fantastic support", "appreciate your help",
+    "thank you", "thanks so much", "very helpful",
+    "you explained it well", "you made it easy",
+    "you solved my issue", "you were very patient",
+    "you were very clear", "you handled this well",
+    "you took care of everything", "you made this simple",
+    "great job", "awesome support", "wonderful assistance",
+    "really appreciate it", "that was fast", "that was easy",
+
+    "great", "good", "excellent", "amazing", "wonderful", "fantastic",
+    "positive", "satisfied", "happy", "pleased", "delighted", "awesome",
+    "love", "loved", "loving", "like", "liked",
+    "appreciate", "appreciated", "appreciation", "thankful", "grateful",
+    "smooth", "easy", "working", "perfect",
+    "outstanding", "brilliant", "superb", "impressive", "nice",
+    "trustworthy", "much better", "improved", "improvement",
+    "helped", "helping", "fantastic service"
+]
+
+def sanitize_transcript(text) -> str | Literal['']:
+    # Remove everything before the first '---'
+    if "---" in text:
+        text = text.split("---", 1)[1]
+    # Remove **bold markdown**
+    text = re.sub(pattern=r"\*\*(.*?)\*\*", repl="", string=text)
+    # Remove (parentheses content)
+    text = re.sub(pattern=r"\([^)]*\)", repl="", string=text)
+    # Remove [bracket content]
+    text = re.sub(pattern=r"\[[^\] ]*\]", repl="", string=text)
+    # Normalize whitespace
+    text = re.sub(pattern=r"\s+", repl=" ", string=text).strip()
+
+    return text
+
+def empathy_score(text: str) -> int:
+    text = text.lower()
+    return sum(text.count(p.lower()) for p in EMPATHY_PHRASES)
 
 
-def agent_turns(text) -> int:
-    if not isinstance(text, str):
-        return 0
-    prefix = "Agent:" if "Agent:" in text else "Agent"
-    return text.count(prefix)
+def emotion_frustration(text: str) -> int:
+    text = text.lower()
+    return sum(text.count(w) for w in FRUSTRATION_WORDS)
 
+
+def emotion_anger(text: str) -> int:
+    text = text.lower()
+    return sum(text.count(w) for w in ANGRY_WORDS)
 
 # Escalation / Resolution Flags
 def escalation_flag(text: str) -> bool:
@@ -194,30 +227,34 @@ def escalation_flag(text: str) -> bool:
     return any(
         phrase in text
         for phrase in [
-            "let me speak to a supervisor",
-            "i want a manager",
-            "this needs escalation",
-            "transfer me",
+            "supervisor", "manager", "escalation", "transfer me",
+            "speak to a manager", "supervisor", "escalate", "cancel my",
+            "cancellation", "close my account", "switch provider", "lawsuit",
+            "attorney", "legal action", "BBB", "better business bureau",
+            "complaint", "unacceptable", "ridiculous", "worst service",
         ]
     )
 
-def resolution_flag(text: str) -> bool:
-    
+def resolution_flag(text: str) -> bool:  
     text = text.lower()
     return any(
         phrase in text
-        for phrase in ["resolved", "fixed", "taken care of", "issue closed"]
+        for phrase in [
+            "resolved", "fixed", "taken care of", "issue closed",
+            "that helps", "sounds good", "i appreciate",
+            "fixed", "taken care of", "great", "perfect", "that works", 
+            "satisfied", "happy with" 
+        ]
     )
-
 
 
 # Sentiment Shift Helpers
 TURN_SPLIT_RE = re.compile(pattern=r"(Agent:|Customer:)")
 
-def split_turns(transcript: str) -> list[Any] | list[str | Any]:
-    if not transcript:
+def split_turns(text: str) -> list[Any] | list[str | Any]:
+    if not text:
         return []
-    text = re.sub(pattern=r"\s+", repl=" ", string=transcript).strip()
+    text = re.sub(pattern=r"\s+", repl=" ", string=text).strip()
     if "Agent" in text or "Customer" in text:
         parts = TURN_SPLIT_RE.split(string=text)
         merged = []
@@ -230,7 +267,7 @@ def split_turns(transcript: str) -> list[Any] | list[str | Any]:
     return re.split(pattern=r"(?<=[.!?])\s+", string=text)
 
 
-def predict_sentiment_batch(texts: list[str], model, tokenizer, device) -> np.ndarray[tuple[int, int], np.dtype[np.floating[Any]]] | np.ndarray[Tuple[Any, ...], np.dtype[Any]]:
+def predict_sentiment_batch(texts: list[str], model, tokenizer) -> np.ndarray[tuple[int, int], np.dtype[np.floating[Any]]] | np.ndarray[Tuple[Any, ...], np.dtype[Any]]:
     if not texts:
         return np.empty((0, model.num_labels), dtype=np.float32)
 
@@ -239,8 +276,8 @@ def predict_sentiment_batch(texts: list[str], model, tokenizer, device) -> np.nd
         return_tensors="pt",
         truncation=True,
         padding=True,
-        max_length=256
-    ).to(device)
+        max_length=512
+    ).to(DEVICE)
 
     with torch.no_grad():
         logits = model(**encoded).logits
@@ -249,8 +286,8 @@ def predict_sentiment_batch(texts: list[str], model, tokenizer, device) -> np.nd
     return probs
 
 
-def sentiment_trajectory(turns, model, tokenizer, device) -> list[Any]:
-    probs_batch = predict_sentiment_batch(texts=turns, model=model, tokenizer=tokenizer, device=device)
+def sentiment_trajectory(turns, model, tokenizer) -> list[Any]:
+    probs_batch = predict_sentiment_batch(texts=turns, model=model, tokenizer=tokenizer)
     preds = np.argmax(probs_batch, axis=1)
 
     trajectory = []
@@ -281,52 +318,92 @@ def compute_sentiment_shift(trajectory) -> float:
     return float(np.linalg.norm(shift_vector))
 
 # QA Score Helper
-def qa_score(text: str) -> float:
-    empathy = empathy_score(text=text)
-    frustration = emotion_frustration(text=text)
-    toxicity = toxicity_score(text=text)
-    agent_turn= agent_turns(text=text)
-    
-    def compute_escalation_probability(text: str, frustration: int, toxicity: float) -> float:
-        score = 0
-        t = text.lower()
-
-        if "cancel" in t or "switch providers" in t:
-            score += 4
-        if frustration >= 3:
-            score += 3
-        if toxicity > 0.3:
-            score += 2
-        if "billing" in t:
-            score += 1
-        if "outage" in t:
-            score += 1
-
-        return min(1.0, score / 10)
-    
-    escalation = compute_escalation_probability(text=text, frustration=frustration, toxicity=toxicity)
+def compute_text_features(text: str) -> dict[str, Any]:
+    words = text.split()
+    word_count = len(text.split())
+    avg_word_length = sum(len(w) for w in words) / max(word_count, 1)
+    num_exclamation = text.count("!")
+    lower = text.lower()
 
 
-    # Weighted QA score (0–100)
-    score = (
-        empathy * 4
-        - frustration * 3
-        - toxicity * 20
-        - escalation * 30
-        + (agent_turn > 0) * 10
-    )
-
-    score = max(0, min(100, score))
-
-    return score
+    num_negative = sum(1 for w in NEGATIVE_WORDS if w in lower)
+    num_positive = sum(1 for w in POSITIVE_WORDS if w in lower)
 
 
+    return {
+        "word_count": word_count,
+        "avg_word_length": round(number=avg_word_length, ndigits=2),
+        "num_exclamation_marks": num_exclamation,
+        "num_negative_words": num_negative,
+        "num_positive_words": num_positive,
+    }
+
+
+def compute_emotion_scores(text: str, text_features: dict) -> dict[str, float]:
+    lower = text.lower()
+    word_count = max(text_features["word_count"], 1)
+    neg_ratio = text_features["num_negative_words"] / max(word_count / 50, 1)
+    pos_ratio = text_features["num_positive_words"] / max(word_count / 50, 1)
+    excl_ratio = text_features["num_exclamation_marks"] / max(word_count / 100, 1)
+
+    frustration_hits = sum(1 for p in FRUSTRATION_WORDS if p in lower)
+    frustration = min(1.0, round(number=neg_ratio * 0.4 + excl_ratio * 0.2 +
+                                  frustration_hits * 0.15, ndigits=2))
+
+    # Anger: driven by strong negative words + capitalization + exclamation
+    anger_hits = sum(1 for p in ANGRY_WORDS if p in lower)
+    anger = min(1.0, round(number=anger_hits * 0.25 + excl_ratio * 0.15, ndigits=2))
+
+    # Joy: driven by positive words
+    joy = min(1.0, round(number=pos_ratio * 0.5, ndigits=2))
+
+
+    return {
+        "anger": anger,
+        "frustration": frustration,
+        "joy": joy,
+    }
+
+
+def compute_qa_score(
+    emotions: dict,
+    text_features: dict,
+    escalated: bool,
+    resolved: bool,
+    sentiment_label: str,
+    confidence: float ,
+) -> float:
+    score = 5.0  # baseline
+
+    # Sentiment contribution
+    if sentiment_label.lower() == "positive":
+        score += 2.0
+    elif sentiment_label.lower() == "negative":
+        score -= 2.0
+
+
+    # Confidence adjusts magnitude
+    score += (confidence - 0.5) * 1.0
+
+
+    # Emotion penalties
+    score -= emotions.get("frustration", 0) * 1.5
+    score -= emotions.get("anger", 0) * 2.0
+    score += emotions.get("joy", 0) * 1.0
+
+
+    # Resolution bonus, escalation penalty
+    if resolved:
+        score += 1.5
+    if escalated:
+        score -= 1.5
+
+    return round(number=max(0.0, min(10.0, score)), ndigits=1)
 
 # MODEL LOADING
 def model_fn(model_dir: str) -> Any:
-    # subprocess.check_call(args=["pip", "install", "-r", "/opt/ml/model/requirements.txt"])
     
-    global tokenizer, model, sentiment_schema
+    global tokenizer, model
     logger.info(msg=f"[DEBUG] model_dir = {model_dir}")
     logger.info(msg=f"[DEBUG] Files in model_dir: {os.listdir(path=model_dir)}")
     
@@ -341,14 +418,9 @@ def model_fn(model_dir: str) -> Any:
         model.eval()
     
 
-        # Load schema
-        schema_path = os.path.join(model_dir, "sentiment_schema.json")
-        with open(file=schema_path, mode="r") as f:
-            sentiment_schema = json.load(fp=f)
-            
-        logger.info(f"[DEBUG] model.config.num_labels = {model.config.num_labels}")
-        logger.info(f"[DEBUG] model.config.id2label = {model.config.id2label}")
-        logger.info(f"[DEBUG] classifier head = {model.classifier}")
+        logger.info(msg=f"[DEBUG] model.config.num_labels = {model.config.num_labels}")
+        logger.info(msg=f"[DEBUG] model.config.id2label = {model.config.id2label}")
+        logger.info(msg=f"[DEBUG] classifier head = {model.classifier}")
 
 
         logger.info(msg="[model_fn] Model + tokenizer loaded successfully.")
@@ -363,6 +435,7 @@ def model_fn(model_dir: str) -> Any:
 
 # INPUT PARSING
 def input_fn(request_body: str, content_type: str) -> Dict[str, Any]:
+    logger.info(msg=f"[input_fn] RequestBody={request_body}")
     try:
         logger.info(msg=f"[input_fn] Received content_type={content_type}")
 
@@ -373,12 +446,12 @@ def input_fn(request_body: str, content_type: str) -> Dict[str, Any]:
             if isinstance(data, dict):
                 texts = [data.get("call_transcript", "")]
                 meta = [data]
-
+                logger.info(msg=f"[input_fn] Texts={texts}")
             # Batch of records
             elif isinstance(data, list):
                 texts = [d.get("call_transcript", "") for d in data]
                 meta = data
-
+                logger.info(msg=f"[input_fn] TextsBatch={texts}")
             else:
                 raise ValueError("JSON payload must be dict or list.")
 
@@ -401,9 +474,18 @@ def input_fn(request_body: str, content_type: str) -> Dict[str, Any]:
 
 # PREDICTION
 def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
+    logger.info(msg=f"[DEBUG] Model: {model}")
+
+    
+    logger.info(msg=f"[DEBUG] P model.config.num_labels = {model.config.num_labels}")
+    logger.info(msg=f"[DEBUG] P model.config.id2label = {model.config.id2label}")
+    logger.info(msg=f"[DEBUG] P classifier head = {model.classifier}")
     try:
         texts = inputs["texts"]
         meta = inputs["meta"]
+        
+        logger.info(msg=f"[DEBUG] Predict Text: {texts}")
+        logger.info(msg=f"[DEBUG] Predict Meta: {meta}")
 
         results = []
         for text, m in zip(texts, meta): 
@@ -412,7 +494,7 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
                 text,
                 padding="max_length",
                 truncation=True,
-                max_length=256,
+                max_length=512,
                 return_tensors="pt"
             ).to(DEVICE)
             
@@ -422,21 +504,9 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
                 print("[DEBUG] Raw logits:", logits.cpu().numpy())
                 probs = torch.softmax(input=logits, dim=-1)[0].cpu().numpy()
                 
-            logger.info(f"[DEBUG] Raw logits: {logits.cpu().numpy().tolist()}")
+            logger.info(msg=f"[DEBUG] Raw logits: {logits.cpu().numpy().tolist()}")
+            logger.info(msg=f"[DEBUG] Probs1: {probs}")
 
-            # inputs = tokenizer(
-                #  text,
-                #  return_tensors="pt",
-                #  truncation=True,
-                #  padding="max_length",
-                #  max_length=256
-            #  )
-            #  
-            # with torch.no_grad():
-                #  outputs = model(**{k: v for k, v in inputs.items()})
-                #  probs = torch.softmax(input=outputs.logits, dim=-1)[0].cpu().numpy()
-                #  pred_idx = int(np.argmax(a=probs))
-                #  confidence = float(probs[pred_idx])
      
             sentiment_map = {
               "0": "negative",
@@ -447,6 +517,11 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
             pred_idx = int(np.argmax(probs))
             confidence = float(probs[pred_idx])
             sentiment_label = sentiment_map[str(pred_idx)]
+            
+            logger.info(f"[DEBUG] Pred_Idx: {pred_idx}")
+            logger.info(f"[DEBUG] Probs2: {probs}")
+            
+            text = sanitize_transcript(text)
 
             # FEATURE EXTRACTION
             fr = emotion_frustration(text=text)
@@ -454,12 +529,21 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
             esc = escalation_flag(text=text)
             res = resolution_flag(text=text)
 
-            turns = split_turns(transcript=text)
-            trajectory = sentiment_trajectory(turns=turns, model=model, tokenizer=tokenizer, device=DEVICE)
+            turns = split_turns(text=text)
+            trajectory = sentiment_trajectory(turns=turns, model=model, tokenizer=tokenizer)
             shift = compute_sentiment_shift(trajectory=trajectory)
+            
+            text_features = compute_text_features(text=text)
+            
+            emo = compute_emotion_scores(text=text, text_features=text_features)
 
-            qa = qa_score(text=text)
-
+            qa = compute_qa_score(
+                sentiment_label=sentiment_label, 
+                confidence=confidence, 
+                emotions=emo, 
+                text_features=text_features, 
+                escalated=esc, resolved=res
+            )
             
             # FINAL RESULT
             results.append({
@@ -495,6 +579,7 @@ def output_fn(prediction: Dict[str, Any], accept: str) -> Tuple[str, Literal["ap
         
             
         logger.info(msg="[output_fn] Serializing output.")
+        logger.info(msg=f"[output_fn] Prediction: {prediction}.")
         return json.dumps(obj=prediction["results"]), "application/json"
 
     except Exception as e:

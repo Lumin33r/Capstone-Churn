@@ -442,7 +442,7 @@ def test_endpoint() -> None:
         "agent_id": "agent_007",
         "agent_name": "James Bond",
         "primary_scenario": "billing_inquiry",
-        "call_transcript": "I do not feel good about my service",
+        "call_transcript": "**Call Transcript** I do not feel good about my serviceasfgdffdfdfasdfsadfsFDAsfdasdfasdfasdfsadfsDFASDFSFASDFAFSASFASFAS",
         "overall_rating": 0,
         "call_successful":  False,
         "customer_monthly_spend": 0.0,
@@ -450,10 +450,9 @@ def test_endpoint() -> None:
         "customer_issue_history": 0,
     }
     
-    with open(file=os.path.join(os.path.dirname(__file__), "call_transcripts.csv")) as f:
-        csv_file = csv.DictReader(f)
-
-        test_payload = next(csv_file)
+    # with open(file=os.path.join(os.path.dirname(__file__), "call_transcripts.csv")) as f:
+        # csv_file = csv.DictReader(f)
+        # test_payload = next(csv_file)
 
     print("Sending test prediction...")
     response = runtime.invoke_endpoint(
