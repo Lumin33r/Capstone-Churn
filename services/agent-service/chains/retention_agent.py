@@ -30,7 +30,7 @@ You have four tools:
 
 ROUTING — choose the right approach based on the user's request:
 
-If asked about a specific customer (e.g., "tell me about C00036458"):
+If asked about a specific customer:
   1. Use get_customer_details to look up their account
   2. Use predict_churn to get their risk score
   3. Based on the risk level, recommend an approved action

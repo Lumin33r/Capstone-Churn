@@ -16,7 +16,7 @@ def get_customer_details(customer_id: str) -> str:
     Use this when asked about a specific customer's account or history.
 
     Args:
-        customer_id: The customer ID (e.g., C00036458)
+        customer_id: The customer ID
 
     Returns:
         JSON with account details, plan info, complaints, and call data

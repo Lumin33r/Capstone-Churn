@@ -18,14 +18,12 @@ import json
 import os
 import time
 import tarfile
-import shutil
-import csv
 
 import boto3
 import glob
+from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 from validator import valid_checks
-from pathlib import Path
 
 import atexit
 import concurrent.futures
@@ -43,7 +41,7 @@ ENDPOINT_NAME = "retention-sentiment-analysis-endpoint"
 MODEL_NAME = "retention-sentiment-analysis-model"
 ENDPOINT_CONFIG_NAME = "retention-sentiment-analysis-config"
 EXECUTION_ROLE_NAME = os.getenv(
-    key="EXECUTION_ROLE_NAME",
+    key="EXECUTION_ROLE_NAME", 
     default="retention-sagemaker-execution-role"
 )
 # Free Instance
@@ -53,38 +51,32 @@ INSTANCE_TYPE = "ml.t2.medium"
 # Model artifact paths (relative to this script)
 SCRIPT_DIR: str = os.path.dirname(p=os.path.abspath(path=__file__))
 MODEL_PATHS: list[str] = [
-    os.path.join(SCRIPT_DIR, "model/inference.py"),
-    os.path.join(SCRIPT_DIR, "model/sentiment_columns.json"),
-    os.path.join(SCRIPT_DIR, "model/sentiment_encoders.json"),
-    os.path.join(SCRIPT_DIR, "model/sentiment_schema.json"),
-    os.path.join(SCRIPT_DIR, "model/requirements.txt"),
-    os.path.join(SCRIPT_DIR, "model/pytorch_model.bin"),
-    os.path.join(SCRIPT_DIR, "model/tokenizer.json"),
-    os.path.join(SCRIPT_DIR, "model/special_tokens_map.json"),
-    os.path.join(SCRIPT_DIR, "model/tokenizer_config.json"),
-    os.path.join(SCRIPT_DIR, "model/config.json"),
-    os.path.join(SCRIPT_DIR, "model/vocab.txt"),
+    os.path.join(SCRIPT_DIR, "inference.py"),
+    os.path.join(SCRIPT_DIR, "exported_model/*"),
+    os.path.join(SCRIPT_DIR, "requirements.txt"),
+    # os.path.join(SCRIPT_DIR, "feature_columns.json"),
+    # os.path.join(SCRIPT_DIR, "label_encoders.json"),
+    # os.path.join(SCRIPT_DIR, "label_encoding_schema.json"),
+    # os.path.join(SCRIPT_DIR, "sentiment_columns.json"),
+    # os.path.join(SCRIPT_DIR, "sentiment_encoders.json"),
+    os.path.join(SCRIPT_DIR, "sentiment_schema.json")
 ]
 
 def shutdown_threads() -> None:
-    try:
-        concurrent.futures.thread._python_exit()
-        concurrent.futures.thread._shutdown
-    except:
-        pass
+    concurrent.futures.thread._threads_queues.clear() # type: ignore
+    
 
-
-# Container priority
+# Container priority 
 CONTAINER_CANDIDATES = [
     # Hugging Faces (model is trained on distilbert)
     {
         "name": "huggingfaces",
-        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:2.6.0-transformers4.49.0-cpu-py312-ubuntu22.04"
+        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:1.13.1-transformers4.36.2-cpu"
     },
-    # New Version of Hugging Faces
+    # New Version of Hugging Faces 
     {
         "name": "huggingfaces-new",
-        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:2.6.0-transformers4.49.0-cpu-py312-ubuntu22.04"
+        "image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:2.1.0-transformers4.36.2-cpu"
     },
     # PyTorch Script Mode (great for NLP, public, supports custom inference.py)
     {
@@ -132,11 +124,11 @@ def validate_model_artifacts() -> None:
     ]
 
     for fname in required_files:
-        path = os.path.join(f"{SCRIPT_DIR}/model", fname)
+        path = os.path.join(f"{SCRIPT_DIR}/exported_model", fname)
         if not os.path.isfile(path=path):
             # raise FileNotFoundError(f"Required file missing: {path}")
             pass
-
+            
     # Block HF training artifacts that confuse framework containers
     forbidden_patterns = [
         "checkpoint",
@@ -160,14 +152,10 @@ def validate_model_artifacts() -> None:
     print("Model artifacts validation passed.")
 
 
-
+    
 def package_model(tar_path: str) -> str:
     """Package model artifacts into a tar.gz for SageMaker."""
     validate_model_artifacts()
-    
-    if not os.path.exists(path="exported_model"):
-        os.makedirs(name=f"{SCRIPT_DIR}/exported_model", exist_ok=True)
-        
     print(f"Packaging model to {tar_path}...")
     with tarfile.open(name=tar_path, mode="w:gz") as tr:
         for filepath in MODEL_PATHS:
@@ -189,32 +177,10 @@ def package_model(tar_path: str) -> str:
                     tr.add(name=filepath, arcname=os.path.basename(p=filepath))
 
                 tr.add(name=filepath, arcname=os.path.basename(p=filepath))
-
+    
     print(f"  Created {tar_path}")
-
-    shutil.rmtree(f"{SCRIPT_DIR}/exported_model")
-    print("Local folder deleted.")
-
     return tar_path
 
-
-def download_s3_folder() -> None:
-    """Get export model files for s3 to be zipped."""
-    s3 = boto3.client("s3", region_name=REGION)
-
-    paginator = s3.get_paginator("list_objects_v2")
-    
-    os.makedirs(name=f"{SCRIPT_DIR}/exported_model", exist_ok=True)
-    
-    for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=MODEL_PREFIX):
-        for obj in page.get("Contents", []):
-            s3_key = obj["Key"]
-            rel_path = s3_key[len(MODEL_PREFIX):].lstrip("/")
-            local_path = os.path.join(os.path.dirname(__file__), rel_path)
-            
-            s3.download_file(S3_BUCKET, s3_key, local_path)
-
-    print("Download complete")
 
 def upload_to_s3(tar_path: str) -> str:
     """Upload model.tar.gz to S3 and return the S3 URI."""
@@ -316,7 +282,6 @@ def select_best_container() -> str:
 def create_endpoint(s3_uri: str) -> None:
     """Create SageMaker model, endpoint config, and endpoint."""
     sm = boto3.client("sagemaker", region_name=REGION)
-
     role_arn = get_iam_role()
     image_uri = select_best_container()
 
@@ -442,17 +407,13 @@ def test_endpoint() -> None:
         "agent_id": "agent_007",
         "agent_name": "James Bond",
         "primary_scenario": "billing_inquiry",
-        "call_transcript": "**Call Transcript** I do not feel good about my serviceasfgdffdfdfasdfsadfsFDAsfdasdfasdfasdfsadfsDFASDFSFASDFAFSASFASFAS",
+        "call_transcript": "I feel good about my service",
         "overall_rating": 0,
         "call_successful":  False,
         "customer_monthly_spend": 0.0,
         "customer_service_count": 0,
         "customer_issue_history": 0,
     }
-    
-    # with open(file=os.path.join(os.path.dirname(__file__), "call_transcripts.csv")) as f:
-        # csv_file = csv.DictReader(f)
-        # test_payload = next(csv_file)
 
     print("Sending test prediction...")
     response = runtime.invoke_endpoint(
@@ -460,7 +421,7 @@ def test_endpoint() -> None:
         ContentType="application/json",
         Body=json.dumps(obj=test_payload),
     )
-
+    
     try:
         result = json.loads(s=response["Body"].read().decode())
     except json.JSONDecodeError:
@@ -474,22 +435,16 @@ if __name__ == "__main__":
     parser.add_argument("--delete", action="store_true", help="Delete the endpoint")
     parser.add_argument("--test", action="store_true", help="Test the live endpoint")
     args = parser.parse_args()
-    
+
     if args.delete:
         delete_endpoint()
     elif args.test:
         test_endpoint()
     else:
-        valid_checks()
         tar_path = os.path.join(SCRIPT_DIR, "model.tar.gz")
         package_model(tar_path=tar_path)
         s3_uri = upload_to_s3(tar_path=tar_path)
-        download_s3_folder()
         create_endpoint(s3_uri=s3_uri)
-        if os.path.isdir(s="./model.tar.gz"):
-            os.remove(path="./model.tar.gz")
-        if os.path.isdir(s="./model"):
-            shutil.rmtree(path="./model")
-        if os.path.isdir(s="./exported_model"):
-            os.rmdir(path="./exported_model")
+        valid_checks()
+        
     atexit.register(shutdown_threads)

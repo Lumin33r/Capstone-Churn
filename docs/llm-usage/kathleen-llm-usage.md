@@ -1,7 +1,7 @@
 # LLM Usage Log — Kathleen
 
 **Tool:** Claude Code (Claude Opus 4.6, CLI + VS Code extension)
-**Period:** March 30 – April 4, 2026
+**Period:** March 30 – April 11, 2026
 
 ---
 
@@ -213,12 +213,12 @@ Used Claude Code as a pair programming partner throughout the capstone project. 
 - **Bug I found:** Switching between Analyze and Chat tabs wiped the state in both
 - **Fix:** Changed from conditional rendering (`{tab === "analyze" ? <A/> : <B/>}`) to CSS hidden (`<div className={tab === "analyze" ? "" : "hidden"}>`) so both tabs stay mounted
 
-### Okino's PR #46 Review
-- Identified that his PR deletes our entire `services/churn-predictor-api/` directory
-- He also renames `qa_tool.py` → `sentiment_tool.py` and restructures `services/` → `backend/`
-- **My guidance:** Requested changes on the PR — told him not to delete our code, offered to coordinate the rename
+### PR #46 Review — Cross-Service File Conflicts
+- Identified that the PR included changes to `services/churn-predictor-api/` along with the sentiment service rename
+- Renames `qa_tool.py` → `sentiment_tool.py` and restructures `services/` → `backend/`
+- **My guidance:** Requested changes on the PR — coordinated to avoid overwriting each other's services
 - Created `.backup/` directory to protect critical files from branch conflicts
-- Tested his live SageMaker sentiment endpoint — it returns raw class predictions, not the rich JSON output we need
+- Tested the live SageMaker sentiment endpoint — identified that the output format needed additional enrichment fields for the churn predictor integration
 
 ### Rubric Audit
 - Conducted full audit of all 10 rubric areas against current implementation
@@ -246,14 +246,14 @@ Used Claude Code as a pair programming partner throughout the capstone project. 
 **Outcome:** Batch prediction + caching implemented.
 
 ### 17. Protecting Code from PR Deletions
-**My guidance:** After discovering Okino's PR deletes our code, created `.backup/` and established the rule: always verify files exist on current branch before starting work.
+**My guidance:** After discovering file conflicts across PRs, created `.backup/` and established the rule: always verify files exist on current branch before starting work.
 
 ### 18. Not Making Assumptions About Teammate's Code
-**My guidance:** When Claude offered to rewrite Okino's qa_tool.py to call his SageMaker endpoint directly, I said "No, I don't want to make those assumptions. We will work it through this evening."
+**My guidance:** When Claude offered to rewrite the sentiment tool to call the SageMaker endpoint directly, I said "No, I don't want to make those assumptions. We will work it through this evening."
 
 ### 19. Frankenstein PR — Cherry-Picking Across Branches
-**Situation:** Okino's PR #46 had useful new sentiment files but also deleted our working code and restructured directories. PR #47 had our LangGraph/LangSmith work. Neither could merge cleanly.
-**My guidance:** Asked Claude to cherry-pick Okino's sentiment files from his branch, combine with our code from backups, and create a single consolidated PR #48. Closed both #46 and #47.
+**Situation:** PR #46 had useful new sentiment files alongside directory restructuring. PR #47 had our LangGraph/LangSmith work. Neither could merge cleanly due to overlapping file changes.
+**My guidance:** Asked Claude to cherry-pick the sentiment files from one branch, combine with our code from backups, and create a single consolidated PR #48. Closed both #46 and #47.
 **Outcome:** Clean PR with all components working together. Required manual verification that every file from both PRs was included.
 
 ### 20. Defending Working Code
@@ -275,3 +275,85 @@ Used Claude Code as a pair programming partner throughout the capstone project. 
 - Establish stricter PR review process — too many files were modified outside lane ownership
 - Use LangGraph from the start instead of AgentExecutor — the explicit state graph is easier to reason about and debug
 - Set up LangSmith from Day 1 — would have caught the action selection issue much earlier
+
+---
+
+## Session 3 Work (April 9–11, 2026)
+
+### Churn Endpoint Recovery
+- Troy redeployed SageMaker endpoints via Terraform, which broke the churn predictor
+- **Root cause:** Terraform `sagemaker.tf` defined the endpoints, but our `deploy.py` also managed them. When Troy ran `terraform apply`, it destroyed and recreated the churn endpoint with an `inference.py` that garbled CSV input
+- **My analysis:** Asked Claude to check CloudWatch logs. Identified `ValueError: could not convert string to float` — the inference.py was corrupting raw bytes
+- Redeployed using our original `deploy.py` (native XGBoost, no inference.py) — endpoint restored
+- **Resolution:** Added churn endpoint to `sagemaker.tf` initially, then agreed with Troy to remove ALL SageMaker resources from Terraform. Endpoints now managed exclusively by `sagemaker-deploy.yml` GitHub Actions workflow. Single owner per resource prevents conflicts.
+
+### Systematic PR Review Process
+- Reviewed a large PR (132k additions) across k8s, Terraform, sentiment service, model artifacts
+- **My approach:** Organized review into categories: Blocking (will break), Merge Conflicts, Structural (won't break immediately but creates problems), and Positive (acknowledge good work)
+- Led with positives (guardrails, EKS, k8s services), then blocking items with specific file/line references
+- **Key findings:**
+  - Env var naming inconsistency across configmap, docker-compose, and code — three names for one value
+  - Cross-service imports that won't resolve in Docker containers
+  - API output format needed alignment with downstream consumers
+  - Directory restructuring would break existing docker-compose and CI/CD references
+- **My guidance:** Asked Claude to walk through each issue with multiple solution options, then compiled into a single structured review comment on the PR
+
+### Amazon Transcribe Pipeline (Stretch Goal)
+- Built as an independent workstream while the sentiment endpoint integration was in progress
+- **Lambda function:** S3 audio upload → Amazon Transcribe job with speaker diarization (2 speakers) → transcript saved to S3
+- **Deploy script:** Standalone `deploy_lambda.py` using boto3 (not Terraform) — cleaner for Lambda-specific logic
+- **API endpoints:** Added `/transcribe`, `/transcripts`, `/transcripts/{name}` to churn predictor API
+- **Frontend:** New Transcribe tab (third tab) — file upload, transcript list, speaker-segmented viewer
+- **Bug found:** Transcribe outputs speaker labels differently than expected. The `speaker_labels.segments.items` array only has timestamps — the actual text content is in the top-level `results.items` array with `speaker_label` on each item. Fixed the parser to read from the correct location.
+- **Speaker label logic:** Initially defaulted single-speaker transcripts to "Agent". I caught this — a single speaker saying "I'm experiencing an issue with your product" is clearly a customer. Changed to: two speakers = Agent/Customer, one speaker = "Speaker".
+
+### LangGraph Strategist Node
+- **Troy's concern:** Questioned whether our LangGraph flow was truly "agentic" vs just a pipeline
+- **My analysis:** The flow IS agentic — Claude selects tools based on the question, can skip tools, can chain multiple tools, can loop. But it's predictable in practice because inputs are structured.
+- **My question:** "Should we add another agent responsible for evaluating the churn risk and determining the best recommendation?"
+- **Outcome:** Added a Retention Strategist node to the graph — a second LLM call with a different system prompt focused on action selection. No new service needed, just a new node in the existing graph.
+- **Design decision:** Strategist uses base LLM without tools (reasoning only). Creates two distinct LLM calls visible in LangSmith: Gatherer (collects data) → Strategist (recommends action).
+- **Rubric alignment:** Re-read the assessment requirements. The rubric says "orchestration layer" and "chains or agents" — not "multiple agents." SageMaker endpoints are endpoints, not agents. The single LangGraph orchestrator with multi-step reasoning IS the agentic behavior the rubric asks for.
+
+### Version Conflicts — LangChain/LangGraph
+- Troy's CI/CD workflow was failing on `pip install` due to version conflicts
+- **Root cause:** `requirements.txt` had `langchain==0.3.0` but `langgraph>=0.2.0` — these version-lock `langchain-core` and conflicted
+- Updated to match our working local versions: `langchain>=1.2.0`, `langchain-aws>=1.2.0`, `langgraph>=1.0.0`, `langsmith>=0.6.0`
+
+---
+
+## Instances Where I Provided Guidance — Session 3
+
+### 22. Terraform vs deploy.py Ownership
+**Situation:** Troy removed all SageMaker resources from `sagemaker.tf`. I initially wanted Terraform to manage them for the rubric.
+**My realization:** The roadmap already documents `sagemaker-deploy.yml` as the endpoint manager. Having both caused the exact conflict that broke the endpoint. One owner per resource is correct.
+**Outcome:** Approved Troy's change.
+
+### 23. Systematic PR Review
+**My approach:** Instead of commenting on individual lines, organized the review into prioritized categories (Blocking → Conflicts → Structural → Positive). Asked Claude to compile multiple solution options for each issue.
+**Outcome:** Posted comprehensive review with actionable steps for each issue.
+
+### 24. Transcribe Speaker Labels
+**My observation:** Single-speaker transcript was labeled "Agent" — wrong assumption. A person saying "I have an issue with your product" is a customer.
+**Outcome:** Changed logic: two speakers = Agent/Customer (first speaker is agent), one speaker = neutral "Speaker" label.
+
+### 25. Questioning "Agentic" Architecture
+**My concern:** "I just don't think agents 1 and 2 are agents. They are just endpoints."
+**Outcome:** Re-read the rubric requirements carefully. Confirmed the rubric uses "agent" only for the orchestration layer, calls SageMaker components "endpoints." Correct framing matters for the presentation.
+
+### 26. Strategist vs New Service
+**My question:** Should the strategist be a separate service (true multi-agent) or a node in the existing graph?
+**Claude's recommendation:** Node in the existing graph — 30 minutes vs a full new service, less risk before demo.
+**My decision:** Agreed. One graph with two reasoning phases is architecturally cleaner and still shows multi-step reasoning in LangSmith.
+
+---
+
+### What I Would Do Differently
+- Start with the XGBoost container from the beginning instead of sklearn (would have saved 6 deploy attempts)
+- Upload Agent 1 synthetic data to S3 immediately instead of relying on local file paths
+- Set up docker-compose for local development earlier in the project
+- Establish stricter PR review process — too many files were modified outside lane ownership
+- Use LangGraph from the start instead of AgentExecutor — the explicit state graph is easier to reason about and debug
+- Set up LangSmith from Day 1 — would have caught the action selection issue much earlier
+- Establish single-owner-per-resource rule for infrastructure from Day 1 — would have prevented the Terraform/deploy.py endpoint conflict
+- Build the Transcribe pipeline earlier — it's independent of other work and adds AWS service breadth for the rubric
