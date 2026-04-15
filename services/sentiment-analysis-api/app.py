@@ -1,20 +1,15 @@
 import os
 import json
 import logging
-import time
-import random
-import csv
 import pandas as pd
 from typing import Any
 
 
 import boto3
-import botocore
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from botocore.exceptions import ClientError
 from io import StringIO
 
 
@@ -33,7 +28,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SENTIMENT_ENDPOINT_NAME = os.getenv(key="SENTIMENT_ENDPOINT_NAME", default="sentiment-analysis-endpoint")
+SENTIMENT_ENDPOINT_NAME = os.getenv(key="SENTIMENT_ENDPOINT_NAME", default="retention-sentiment-analysis-endpoint")
 GUARDRAIL_NAME = os.getenv(key="GUARDRAIL_NAME", default="sentiment-analysis-guardrail")
 S3_BUCKET = os.getenv(key="S3_BUCKET", default="retention-engine-bucket")
 AWS_REGION = os.getenv(key="AWS_REGION", default="us-east-1")
@@ -133,107 +128,6 @@ def load_notebook() -> Any:
 
 
 
-# Guardrail Logic
-def get_guardrail_info() -> dict[str, Any]:
-    bedrock = boto3.client("bedrock", region_name=AWS_REGION)
-    response = bedrock.list_guardrails()
-
-    for item in response.get("guardrails", []):
-        if item.get("name") == GUARDRAIL_NAME:
-            return {
-                "guardrail_id": item["id"],
-                "guardrail_version": item["version"],
-                "status": item["status"],
-                "description": item["description"],
-            }
-
-    raise ValueError(f"Guardrail '{GUARDRAIL_NAME}' not found.")
-
-def invoke_with_retries(
-    func,
-    max_retries: int = 10,
-    base_delay: float = 0.2,
-    max_delay: float = 8.0,
-    retryable_errors: tuple = ("ThrottlingException", "TooManyRequestsException")
-) -> Any:
-    """
-    Generic retry wrapper with exponential backoff + jitter.
-    Works for Bedrock, Guardrails, SageMaker, DynamoDB, etc.
-    """
-
-    for attempt in range(max_retries):
-        try:
-            return func()
-
-        except ClientError as e:
-            error_code = e.response["Error"]["Code"]
-
-            # Only retry throttling‑type errors
-            if error_code not in retryable_errors:
-                raise
-
-            # Exponential backoff with full jitter
-            sleep_time = min(max_delay, base_delay * (2 ** attempt))
-            sleep_time = random.uniform(0, sleep_time)
-
-            # Optional: log throttling event
-            print(f"[Retry {attempt+1}/{max_retries}] Throttled ({error_code}). "
-                  f"Sleeping {sleep_time:.2f}s")
-
-            time.sleep(sleep_time)
-
-    raise RuntimeError("Exceeded max retries due to throttling")
-
-def chunk_text(text: str, max_chars: int = 4000) -> list[str]:
-    return [text[i:i + max_chars] for i in range(0, len(text), max_chars)]
-
-def run_guardrails(transcript: str) -> dict[str, Any]:
-    guardrail = get_guardrail_info()
-    runtime = boto3.client("bedrock-runtime", region_name=AWS_REGION)
-    # Combine everything into ONE guardrail call
-    text = f"TRANSCRIPT:{transcript}"
-
-    # Chunk if needed to avoid text‑unit throttling
-    chunks = chunk_text(text=text)
-
-   
-    # Evaluate each chunk
-    for idx, chunk in enumerate(chunks):
-        def check(text: str) -> dict[str, Any] | dict[str, bool]:
-            payload = {
-                # "anthropic_version": "bedrock-2023-05-31",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [{"text": text}]
-                    }
-                ],
-                "inferenceConfig": {
-                    "max_new_tokens": 200,
-                    "temperature": 0.1
-                }
-            }
-
-            def call() -> Any:
-                return runtime.invoke_model(
-                    modelId="amazon.nova-micro-v1:0",
-                    guardrailIdentifier=guardrail["guardrail_id"],
-                    guardrailVersion=guardrail["guardrail_version"],
-                    body=json.dumps(obj=payload)
-                )
-        
-            response = invoke_with_retries(func=call)
-            output = json.loads(s=response["body"].read())
-            if output.get("amazon-bedrock-guardrailAction") == "INTERVENED":
-                return {"blocked": True, "reason": "Guardrail intervention triggered.", "trace": output.get("amazon-bedrock-guardrailTrace")}
-            
-            time.sleep(0.05)
-
-            return {"blocked": False}
-
-    return {"blocked": False}
-
-
 def encode_features(raw: dict, label_encoders: dict) -> str:
     """Encode a raw feature dict to a CSV string for SageMaker."""
     LABEL_ENCODERS = label_encoders
@@ -325,15 +219,7 @@ def analyze_sentiment(req: CallRecord | dict, input: str | None = None) -> dict[
     # Load dynamic files
     files = load_model_files()
     notebook = load_notebook()
-
-    # Guardrail check
-    guardrail = run_guardrails(transcript=customer.call_transcript)
-    if guardrail["blocked"] == True:
-        return {
-            "error": guardrail["reason"],
-            "blocked": True,
-            "source": guardrail["source"]
-        }
+    
 
     # Invoke Sagemaker
     try:
@@ -341,4 +227,8 @@ def analyze_sentiment(req: CallRecord | dict, input: str | None = None) -> dict[
     except Exception as e:
         logger.exception(msg="Sagemaker invocation failed")
         return {"error": str(object=e), "status": "failure"}
+
+
+
+
 
