@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 
 const CHURN_API_URL = import.meta.env.VITE_CHURN_API_URL || "http://localhost:8001";
-const SENTIMENT_API_URL = import.meta.env.VITE_SENTIMENT_API_URL || "http://localhost:8000";
+const SENTIMENT_API_URL = import.meta.env.VITE_SENTIMENT_API_URL || "http://localhost:8002";
 const AGENT_API_URL = import.meta.env.VITE_AGENT_API_URL || "http://localhost:8000";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -260,10 +260,36 @@ function AnalyzeTab() {
     if (!customerId) { setError("Select a customer ID"); return; }
     setLoading(true); setError(null); setResult(null);
     try {
+      const predictPayload: Record<string, unknown> = { customer_id: customerId };
+
+      // If transcript provided, analyze it via sentiment API first
+      if (transcript.trim().length > 10) {
+        const sentRes = await fetch(`${SENTIMENT_API_URL}/predict`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcript: transcript.trim(), customer_id: customerId }),
+        });
+        if (sentRes.ok) {
+          const sentData = await sentRes.json();
+          predictPayload.qa_score = sentData.qa_score;
+          predictPayload.sentiment = sentData.sentiment;
+          predictPayload.emotion_frustration = sentData.emotion_frustration;
+          predictPayload.emotion_anger = sentData.emotion_anger;
+          predictPayload.sentiment_shift = sentData.sentiment_shift;
+          predictPayload.escalation_flag = sentData.escalation_flag ? 1 : 0;
+          predictPayload.resolution_flag = sentData.resolution_flag ? 1 : 0;
+        }
+
+        // Save transcript to S3 in the background
+        fetch(`${CHURN_API_URL}/save-transcript?customer_id=${encodeURIComponent(customerId)}&transcript=${encodeURIComponent(transcript.trim())}&source=analyze`, {
+          method: "POST",
+        }).catch(() => {});
+      }
+
       const res = await fetch(`${CHURN_API_URL}/predict`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer_id: customerId }),
+        body: JSON.stringify(predictPayload),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
@@ -512,6 +538,7 @@ interface TranscriptDetail {
 }
 
 function TranscribeTab() {
+  const [customerId, setCustomerId] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
   const [transcripts, setTranscripts] = useState<TranscriptMeta[]>([]);
@@ -542,7 +569,10 @@ function TranscribeTab() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const res = await fetch(`${CHURN_API_URL}/transcribe`, {
+      const url = customerId
+        ? `${CHURN_API_URL}/transcribe?customer_id=${encodeURIComponent(customerId)}`
+        : `${CHURN_API_URL}/transcribe`;
+      const res = await fetch(url, {
         method: "POST",
         body: formData,
       });
@@ -582,6 +612,10 @@ function TranscribeTab() {
           <div className="flex items-center gap-2 mb-4">
             <Mic className="w-4 h-4 text-gray-500" />
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Upload Audio</h2>
+          </div>
+          <div className="mb-4">
+            <CustomerCombobox value={customerId} onChange={setCustomerId} />
+            <p className="text-xs text-gray-400 mt-1">Associate this recording with a customer account</p>
           </div>
           <div
             className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-trilink-light transition-colors cursor-pointer"
