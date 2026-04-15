@@ -1,130 +1,360 @@
-# GitHub template for small projects
+# 📘 **Capstone‑Churn**
 
-This is a GitHub template designed for small projects that is independent of the programming language used. It uses various GitHub features to manage issues and pull requests, while enforcing best practices for small projects.
+_A cloud‑native, end‑to‑end churn prediction and call‑center analytics platform._
 
-[![GitHub issues](https://img.shields.io/github/issues/maehr/github-template.svg)](https://github.com/maehr/github-template/issues)
-[![GitHub forks](https://img.shields.io/github/forks/maehr/github-template.svg)](https://github.com/maehr/github-template/network)
-[![GitHub stars](https://img.shields.io/github/stars/maehr/github-template.svg)](https://github.com/maehr/github-template/stargazers)
-[![GitHub license](https://img.shields.io/github/license/maehr/github-template.svg)](https://github.com/maehr/github-template/blob/main/LICENSE.md)
+`https://img.shields.io/badge/build-passing-brightgreen`
+`https://img.shields.io/badge/python-3.10%2B-blue`
+`https://img.shields.io/badge/AWS-SageMaker%20%7C%20EKS-orange`
+`https://img.shields.io/badge/Kubernetes-Production--Ready-blue`
+`https://img.shields.io/badge/Terraform-IaC-623CE4`
+`https://img.shields.io/badge/Docker-Containerized-2496ED`
+`https://img.shields.io/badge/license-AGPL--3.0-lightgrey`
 
-## Why use a template (even for small projects)
+---
 
-- Write better [documentation](#documentation) for you and the community
-- Write more [consistent](#consistency) code and foster collaboration
-- Increase [security](#security)
-- Follow recognized [ethical principles](#ethics)
-- Promote [Free and Open-source software](#foss)
+# 🧠 Overview
 
-## How this template helps you
+**Capstone‑Churn** is a full‑stack, cloud‑native machine learning system designed to:
 
-### Documentation
+- Predict customer churn
+- Analyze call‑center transcripts
+- Detect sentiment, frustration, escalation, and agent behavior
+- Provide real‑time insights through a modern frontend
+- Deploy ML models to AWS SageMaker
+- Run microservices on Kubernetes
+- Automate infrastructure with Terraform
 
-- [README.md](README.md) according to [www.makeareadme.com](https://www.makeareadme.com/)
-- [CHANGELOG.md](CHANGELOG.md) according to [keepachangelog.com](https://keepachangelog.com/)
-- Automated [CHANGELOG.md](CHANGELOG.md) via [git-cliff](https://github.com/orhun/git-cliff)
-- [package.json](package.json) according to [npm docs](https://docs.npmjs.com/cli/v7/configuring-npm/package-json)
-- Accessible documentation via [gh-pages](https://help.github.com/en/articles/configuring-a-publishing-source-for-github-pages)
+This project integrates **ML**, **NLP**, **MLOps**, **DevOps**, and **cloud infrastructure** into a cohesive, production‑ready platform.
 
-### Consistency
+---
 
-- Consistent formatting via [Prettier](https://prettier.io/)
-- Consistent pre-commit checks via [prek](https://github.com/j178/prek)
-- Consistent commit messages according to [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) via [commitizen](https://github.com/commitizen/cz-cli)
-- Consistent versioning via [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
-- Consistent [fork and pull](https://gist.github.com/Chaser324/ce0505fbed06b947d962) workflow via [GitHub branch protection](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/managing-a-branch-protection-rule)
-- Consistent issues via [issue templates](https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository)
+# 🌟 Features
 
-### Security
+### 🔍 ML & NLP
 
-- [SECURITY.md](SECURITY.md) according to [GitHub](https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository)
-- [GitHub security alerts](https://github.blog/2017-11-16-introducing-security-alerts-on-github/)
-- Integrity via [GitHub branch protection](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/managing-a-branch-protection-rule)
+- XGBoost churn prediction model
+- Transformer‑based sentiment + emotion classifier
+- Transcript ingestion + processing pipeline
+- Real‑time inference APIs
+- Feature engineering + schema validation
+- MLflow experiment tracking
 
-### Ethics
+### ☁️ Cloud Infrastructure
 
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) according to [Contributor Covenant](https://www.contributor-covenant.org/)
-- Friendly first interactions via [greetings](https://github.com/actions/starter-workflows/blob/main/automation/greetings.yml)
+- AWS SageMaker model deployment
+- EKS Kubernetes cluster
+- ALB ingress controller
+- Terraform‑managed infrastructure
+- Lambda‑based transcription pipeline
 
-### FOSS
+### 🧩 Microservices
 
-- [LICENSE.md](LICENSE.md) according to [choosealicense.com](https://choosealicense.com/)
+- **agent‑service** (LLM‑powered retention agent)
+- **churn‑predictor‑api**
+- **sentiment‑analysis‑api**
+- **transcribe‑pipeline** (Lambda)
+- Backend routing + frontend service
 
-## Installation
+### 🖥️ Frontend
 
-To initialize the template, [generate](https://github.com/maehr/github-template/generate) or [clone](https://docs.github.com/en/github/creating-cloning-and-archiving-repositories/cloning-a-repository) the repository to your local machine and follow this guide.
+- React + TypeScript + Vite
+- Real‑time transcript viewer
+- Churn prediction dashboard
+- Agent‑assist tools
 
-1. Install [Node.js](https://nodejs.org/en/) and run the following commands in the root directory of the repository:
+### 🛠️ Developer Experience
+
+- Dockerized services
+- Local development via `docker-compose`
+- Kubernetes manifests for all services
+- Automated deployment scripts
+- Clear IaC separation
+
+---
+
+# 🏗️ Architecture Overview
+
+```
+                        ┌──────────────────────────────┐
+                        │          Frontend             │
+                        │     (TypeScript + Vite)       │
+                        └──────────────┬───────────────┘
+                                       │
+                                       ▼
+                        ┌──────────────────────────────┐
+                        │        API Gateway            │
+                        │ (K8s Ingress + AWS ALB)       │
+                        └──────────────┬───────────────┘
+                                       │
+       ┌───────────────────────────────┼───────────────────────────────┐
+       ▼                               ▼                               ▼
+┌──────────────┐              ┌────────────────┐              ┌────────────────┐
+│ agent-service│              │ sentiment-api  │              │ churn-api       │
+│ (LLM tools)  │              │ (Transformer)  │              │ (XGBoost)       │
+└──────────────┘              └────────────────┘              └────────────────┘
+       │                               │                               │
+       └──────────────┬────────────────┴───────────────┬──────────────┘
+                      ▼                                ▼
+            ┌────────────────┐                ┌────────────────────┐
+            │ transcribe svc │                │  S3 / DynamoDB      │
+            │  (Lambda)      │                │  (data storage)     │
+            └────────────────┘                └────────────────────┘
+```
+
+---
+
+# 🧰 Tech Stack
+
+### **Languages**
+
+- Python
+- TypeScript
+- Shell
+- HCL (Terraform)
+
+### **ML / NLP**
+
+- XGBoost
+- PyTorch
+- Hugging Face Transformers
+- MLflow
+- SageMaker SDK
+
+### **Infrastructure**
+
+- AWS (SageMaker, Lambda, S3, EKS, IAM, ALB)
+- Kubernetes
+- Terraform
+- Docker
+
+### **Frontend**
+
+- React + TypeScript
+- Vite
+- TailwindCSS
+
+---
+
+# 🤖 Model Details
+
+## **1. Churn Prediction Model**
+
+**Location:** `sagemaker/churn/`
+
+### Model Type
+
+- XGBoost classifier
+- Trained on customer metadata + behavioral features
+
+### Features
+
+Loaded from `feature_columns.json`:
+
+- Tenure
+- Contract type
+- Monthly charges
+- Payment method
+- Support call frequency
+- Account flags
+- Encoded categorical fields
+
+### Artifacts
+
+- `churn_model.joblib`
+- `label_encoders.json`
+- `feature_columns.json`
+
+### Deployment
+
+- Packaged via `setup.py`
+- Deployed to SageMaker using `deploy.py`
+- Served via `churn-predictor-api` microservice
+
+---
+
+## **2. Sentiment + Emotion Model**
+
+**Location:** `sagemaker/sentiment/`
+
+### Model Type
+
+- Fine‑tuned transformer
+- Multi‑class classification for:
+  - Sentiment
+  - Emotion
+  - Frustration
+  - Escalation
+  - Toxicity
+
+### Artifacts
+
+- `sentiment_model.joblib`
+- `sentiment_schema.json`
+- `sentiment_columns.json`
+- `label_encoders.json`
+- Tokenized dataset (HF `DatasetDict`)
+
+### Training
+
+- Notebook: `sentiment_training.ipynb`
+- Script: `sentiment_training.py`
+- MLflow tracking: `mlflow.db`
+
+### Deployment
+
+- Packaged via `requirements.txt`
+- Deployed to SageMaker using `deploy.py`
+- Served via `sentiment-analysis-api`
+
+---
+
+# ⚡ Quick Start
+
+## 1. Clone the repository
 
 ```bash
+git clone https://github.com/Lumin33r/Capstone-Churn
+cd Capstone-Churn
+```
+
+## 2. Local development (Docker Compose)
+
+```bash
+docker-compose up --build
+```
+
+## 3. Frontend development
+
+```bash
+cd frontend
 npm install
+npm run dev
 ```
 
-2. Complete the following checklist of tasks to customize the template for your project:
+---
 
-- [ ] enable [GitHub security alerts](https://github.blog/2017-11-16-introducing-security-alerts-on-github/)
-- [ ] [protect](https://help.github.com/en/articles/configuring-protected-branches) the main branch to enforce a [fork and pull](https://gist.github.com/Chaser324/ce0505fbed06b947d962) workflow
-- [ ] delete [README.md](README.md)
-- [ ] rename [README.template.md](README.template.md) to [README.md](README.md)
-- [ ] search and replace `FULLNAME`, `USERNAME`, `REPO_NAME`, `SHORT_DESCRIPTION` `[INSERT CONTACT METHOD]` in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [package.json](package.json), [README.md](README.md), [SECURITY.md](SECURITY.md), [.github/ISSUE_TEMPLATE/config.yml](.github/ISSUE_TEMPLATE/config.yml)
-- [ ] add favicons to `./`, e.g. via [favicon.io](https://favicon.io/)
-- [ ] search for `TODO` in the project (mostly documentation) and fix it
-- [ ] run `npm run format` to format all files
-- [ ] run `npm run commit` to commit all changes
-- [ ] run `npm run changelog` and include the output in [CHANGELOG.md](CHANGELOG.md)
-- [ ] enable [gh-pages](https://help.github.com/en/articles/configuring-a-publishing-source-for-github-pages)
+# ☁️ Deployment
 
-## Usage
-
-Check that all files are properly formatted.
+## 1. Provision AWS Infrastructure (Terraform)
 
 ```bash
-npm run check
+cd terraform
+terraform init
+terraform apply
 ```
 
-Format all files.
+Creates:
+
+- EKS cluster
+- ALB ingress
+- IAM roles
+- S3 buckets
+- SageMaker endpoints
+- Lambda transcription pipeline
+
+---
+
+## 2. Deploy ML Models to SageMaker
 
 ```bash
-npm run format
+cd sagemaker/churn
+python deploy.py
+
+cd ../sentiment
+python deploy.py
 ```
 
-Run the wizard to write meaningful commit messages.
+---
+
+## 3. Deploy Microservices to Kubernetes
 
 ```bash
-npm run commit
+kubectl apply -f k8s/
 ```
 
-Run the wizard to create a CHANGELOG.md.
+---
+
+# 🧪 Testing
+
+### Unit Tests
 
 ```bash
-npm run changelog
+pytest
 ```
 
-## Support
+### Integration Tests
 
-This project is maintained by [@maehr](https://github.com/maehr). Please understand that we won't be able to provide individual support via email. We also believe that help is much more valuable if it's shared publicly, so that more people can benefit from it.
+- API endpoint tests
+- Model inference tests
+- Lambda local tests (`transcribe-pipeline/test_local.py`)
 
-| Type                                   | Platforms                                                                  |
-| -------------------------------------- | -------------------------------------------------------------------------- |
-| 🚨 **Bug Reports**                     | [GitHub Issue Tracker](https://github.com/maehr/github-template/issues)    |
-| 📚 **Docs Issue**                      | [GitHub Issue Tracker](https://github.com/maehr/github-template/issues)    |
-| 🎁 **Feature Requests**                | [GitHub Issue Tracker](https://github.com/maehr/github-template/issues)    |
-| 🛡 **Report a security vulnerability** | See [SECURITY.md](SECURITY.md)                                             |
-| 💬 **General Questions**               | [GitHub Discussions](https://github.com/maehr/github-template/discussions) |
+### Load Testing
 
-## Roadmap
+- Optional: Locust or K6
 
-No changes are currently planned.
+---
 
-## Contributing
+# 📦 Project Structure
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct, and the process for submitting pull requests to us.
+```
+Capstone-Churn/
+├── frontend/               # UI
+├── services/               # Microservices
+├── sagemaker/              # ML models + training + deployment
+├── k8s/                    # Kubernetes manifests
+├── terraform/              # Infrastructure as code
+├── scripts/                # Utility scripts
+├── docs/                   # Documentation
+└── docker-compose.yml      # Local dev
+```
 
-## Authors and acknowledgment
+---
 
-- **Moritz Mähr** - _Initial work_ - [maehr](https://github.com/maehr)
+# 🤝 Contributing
 
-See also the list of [contributors](https://github.com/maehr/github-template/graphs/contributors) who participated in this project.
+1. Fork the repo
+2. Create a feature branch
+3. Follow Conventional Commits
+4. Run tests + linting
+5. Submit a PR
 
-## License
+---
 
-This project is licensed under the GNU Affero General Public License v3.0 - see the [LICENSE.md](LICENSE.md) file for details.
+# 🏷️ Versioning
+
+This project uses **Semantic Versioning (SemVer)**:
+
+```
+MAJOR.MINOR.PATCH
+```
+
+Example:
+
+```
+1.3.2
+```
+
+---
+
+# 🔐 Security
+
+- Secrets stored in AWS Secrets Manager or Kubernetes Secrets
+- IAM least‑privilege roles
+- No credentials committed to Git
+- Container image scanning recommended
+
+---
+
+# 📄 License
+
+This project is licensed under the **AGPL‑3.0** license.
+
+---
+
+If you'd like, I can also generate:
+
+- A **CONTRIBUTING.md**
+- A **CHANGELOG.md**
+- A **model card** for each ML model
+- A **system architecture diagram (SVG/PNG)**
+- A **frontend screenshot section**
