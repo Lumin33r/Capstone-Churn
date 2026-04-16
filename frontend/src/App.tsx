@@ -249,12 +249,42 @@ function CustomerCombobox({ value, onChange }: { value: string; onChange: (id: s
 
 // ── Analyze Tab ──────────────────────────────────────────────────────
 
+interface SavedTranscript {
+  name: string;
+  key: string;
+  last_modified: string;
+  customer_id: string | null;
+}
+
 function AnalyzeTab() {
   const [customerId, setCustomerId] = useState("");
   const [transcript, setTranscript] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<PredictResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [savedTranscripts, setSavedTranscripts] = useState<SavedTranscript[]>([]);
+  const [loadingTranscripts, setLoadingTranscripts] = useState(false);
+
+  // Load transcripts when customer changes
+  useEffect(() => {
+    if (!customerId) { setSavedTranscripts([]); return; }
+    setLoadingTranscripts(true);
+    fetch(`${CHURN_API_URL}/transcripts?customer_id=${encodeURIComponent(customerId)}`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setSavedTranscripts(data))
+      .catch(() => setSavedTranscripts([]))
+      .finally(() => setLoadingTranscripts(false));
+  }, [customerId]);
+
+  async function loadSavedTranscript(name: string) {
+    try {
+      const res = await fetch(`${CHURN_API_URL}/transcripts/${name}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTranscript(data.transcript || "");
+      }
+    } catch { /* ignore */ }
+  }
 
   async function handleAnalyze() {
     if (!customerId) { setError("Select a customer ID"); return; }
@@ -309,14 +339,51 @@ function AnalyzeTab() {
             <Phone className="w-4 h-4 text-gray-500" />
             <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Call Analysis</h2>
           </div>
-          <CustomerCombobox value={customerId} onChange={setCustomerId} />
+          <CustomerCombobox value={customerId} onChange={(id) => { setCustomerId(id); setTranscript(""); setResult(null); }} />
+
+          {/* Saved transcripts for this customer */}
+          {customerId && (
+            <div className="mt-3">
+              {loadingTranscripts ? (
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Loading transcripts...
+                </div>
+              ) : savedTranscripts.length > 0 ? (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Saved Transcripts ({savedTranscripts.length})
+                  </label>
+                  <div className="space-y-1 max-h-28 overflow-y-auto">
+                    {savedTranscripts.map((t) => (
+                      <button
+                        key={t.key}
+                        onClick={() => loadSavedTranscript(t.name)}
+                        className="w-full text-left px-3 py-1.5 text-xs rounded-md border border-gray-200 hover:border-trilink-light hover:bg-trilink-light/5 transition-colors cursor-pointer flex items-center justify-between"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <FileText className="w-3 h-3 text-gray-400" />
+                          {t.name}
+                        </span>
+                        <span className="text-gray-400">
+                          {new Date(t.last_modified).toLocaleDateString()}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400">No saved transcripts for this customer</p>
+              )}
+            </div>
+          )}
+
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Call Transcript <span className="text-gray-400 font-normal">(optional)</span>
+              Call Transcript <span className="text-gray-400 font-normal">(select above or paste)</span>
             </label>
             <textarea
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-64 resize-none focus:ring-2 focus:ring-trilink-light focus:border-transparent outline-none"
-              placeholder="Paste call transcript here, or leave empty to predict from account data only..."
+              placeholder="Select a saved transcript above, or paste one here..."
               value={transcript} onChange={(e) => setTranscript(e.target.value)}
             />
           </div>
