@@ -522,6 +522,13 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
             logger.info(f"[DEBUG] Probs2: {probs}")
             
             text = sanitize_transcript(text)
+            
+            duration = m.get("call_duration_seconds")
+            cd = (
+               "short" if duration and duration < 180 else
+               "medium" if duration and duration < 600 else
+               "long" if duration else None
+            )
 
             # FEATURE EXTRACTION
             fr = emotion_frustration(text=text)
@@ -549,11 +556,12 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
             results.append({
                 "call_id": m.get("call_id"),
                 "customer_id": m.get("customer_id"),
-                "primary_scenario": m.get("primary_scenario"),
+                "category": m.get("primary_scenario"),
 
                 "sentiment": pred_idx,
                 "sentiment_label": sentiment_label,
                 "confidence": confidence,
+                "call_duration_indicator": cd,
 
                 "qa_score": qa,
                 "emotion_frustration": fr,

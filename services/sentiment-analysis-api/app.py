@@ -3,6 +3,7 @@ import json
 import logging
 import pandas as pd
 from typing import Any
+import csv
 
 
 import boto3
@@ -208,7 +209,7 @@ def analyze_sentiment(req: CallRecord | dict, input: str | None = None) -> dict[
     # if req.customer_id not in customer_data.index:
         # raise HTTPException(status_code=404, detail=f"Customer {req.customer_id} not found")
     
-    customer = find_record(customer_data, req["customer_id"])
+    customer = find_record(customer_data, "C00011194")
     # Validate transcript length
     char_count = len(customer.call_transcript.encode(encoding="utf-8"))
     if char_count < 0:
@@ -223,11 +224,16 @@ def analyze_sentiment(req: CallRecord | dict, input: str | None = None) -> dict[
 
     # Invoke Sagemaker
     try:
-        return invoke_sagemaker(customer=req)
+        return invoke_sagemaker(customer=customer)
     except Exception as e:
         logger.exception(msg="Sagemaker invocation failed")
         return {"error": str(object=e), "status": "failure"}
 
+with open(file=os.path.join(os.path.dirname(__file__), "call_transcripts.csv")) as f:
+    csv_file = csv.DictReader(f)
+    test_payload = next(csv_file)
+
+print(analyze_sentiment(req=test_payload))
 
 
 
