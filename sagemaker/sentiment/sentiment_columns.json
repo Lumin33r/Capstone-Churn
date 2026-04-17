@@ -16,6 +16,7 @@
   "word_count",
   "avg_word_length",
   "num_exclamation_marks",
+  "labels",
   "frustration_level",
   "emotion_scores",
   "toxicity_score",

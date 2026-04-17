@@ -444,16 +444,20 @@ def delete_endpoint() -> None:
 def test_endpoint() -> None:
     """Send a test prediction to the live endpoint."""
     runtime = boto3.client("sagemaker-runtime", region_name=REGION)
+    
+    positive_statement = "I am unbelievably impressed with how flawlessly everything was handled today; the agent went above and beyond, resolved an issue that had been stressing me out for weeks, and delivered some of the best customer service I have ever experienced in my life."
+    negative_statement = "I am extremely frustrated and honestly overwhelmed by how terrible this entire situation has been; nothing has worked correctly, every step has been a complete nightmare, and I feel completely ignored and exhausted by the whole process."
+    neutral_statement = "I am reaching out because I need a clear update on the status of my account changes; there is nothing urgent or problematic at the moment, but I want to understand where things currently stand so I can plan my next steps accordingly."
 
     test_payload = {
-        "call_id": "CALL_000001",
-        "customer_id": "CALL_000001",
+        "call_id": "",
+        "customer_id": "",
         "call_date": "1970-01-01",
         "call_time": "00:00:00",
         "agent_id": "agent_007",
         "agent_name": "James Bond",
         "primary_scenario": "billing_inquiry",
-        "call_transcript": "I do not feel good about my service",
+        "call_transcript": negative_statement,
         "overall_rating": 0,
         "call_successful":  False,
         "customer_monthly_spend": 0.0,
@@ -461,10 +465,10 @@ def test_endpoint() -> None:
         "customer_issue_history": 0,
     }
 
-    with open(file=os.path.join(os.path.dirname(__file__), "call_transcripts.csv")) as f:
-        csv_file = csv.DictReader(f)
-
-        test_payload = next(csv_file)
+    # with open(file=os.path.join(os.path.dirname(__file__), "call_transcripts.csv")) as f:
+        # csv_file = csv.DictReader(f)
+# 
+        # test_payload = next(csv_file)
 
     print("Sending test prediction...")
     response = runtime.invoke_endpoint(

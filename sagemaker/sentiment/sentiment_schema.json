@@ -92,19 +92,11 @@
         "type": "numeric",
         "encoding": "normalize"
       },
-      "joy": {
-        "type": "numeric",
-        "encoding": "normalize"
-      },
       "sadness": {
         "type": "numeric",
         "encoding": "normalize"
       },
-      "surprise": {
-        "type": "numeric",
-        "encoding": "normalize"
-      },
-      "fear": {
+      "frustration": {
         "type": "numeric",
         "encoding": "normalize"
       }
