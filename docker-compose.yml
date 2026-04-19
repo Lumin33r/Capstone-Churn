@@ -15,7 +15,7 @@ services:
       - "8080:8080"
     environment:
       - AWS_REGION=us-east-1
-      - SENTIMENT_PREDICTOR_URL=http://sentiment-predictor:8000
+      - SENTIMENT_URL=http://sentiment-predictor:8002
       - CHURN_PREDICTOR_URL=http://churn-predictor:8001
       - MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0
     env_file:
@@ -40,13 +40,13 @@ services:
     networks:
       - retention-net
 
-  # ── Sentiment Predictor (Okino's SageMaker wrapper) ─────────────────────────
+  # ── Sentiment Predictor (enriched wrapper: SageMaker + NLP enrichment) ────
   sentiment-predictor:
     build:
       context: ./services/sentiment-analysis-api
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8002:8002"
     env_file:
       - .env
     healthcheck:
@@ -55,7 +55,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import httpx; httpx.get('http://localhost:8000/health')",
+          "import httpx; httpx.get('http://localhost:8002/health')",
         ]
       interval: 30s
       timeout: 10s
