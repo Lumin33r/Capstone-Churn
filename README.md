@@ -74,6 +74,8 @@ This project integrates **ML**, **NLP**, **MLOps**, **DevOps**, and **cloud infr
 
 # 🏗️ Architecture Overview
 
+![System Architecture](docs/architecture_final.png)
+
 ```
                         ┌──────────────────────────────┐
                         │          Frontend             │
