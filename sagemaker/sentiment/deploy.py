@@ -39,9 +39,9 @@ MODEL_PREFIX: str = os.getenv(key="MODEL_PREFIX", default="models/sentiment")
 USER_ROLE: str | None = os.getenv(key="USER_ROLE", default="")
 IAM_PATH: str = "/retention/"
 TAR_NAME: str = "model.tar.gz"
-ENDPOINT_NAME = "retention-sentiment-analysis-endpoint"
-MODEL_NAME = "retention-sentiment-analysis-model"
-ENDPOINT_CONFIG_NAME = "retention-sentiment-analysis-config"
+ENDPOINT_NAME = "retention-sentiment-revised-endpoint"
+MODEL_NAME = "retention-sentiment-revised-model"
+ENDPOINT_CONFIG_NAME = "retention-sentiment-revised-config"
 EXECUTION_ROLE_NAME = os.getenv(
     key="EXECUTION_ROLE_NAME",
     default="retention-sagemaker-execution-role"

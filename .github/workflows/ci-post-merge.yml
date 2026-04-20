@@ -128,7 +128,7 @@ jobs:
       - name: Check sentiment endpoint
         run: |
           STATUS=$(aws sagemaker describe-endpoint \
-            --endpoint-name retention-sentiment-analysis-endpoint \
+            --endpoint-name retention-sentiment-revised-endpoint \
             --query 'EndpointStatus' --output text)
           echo "Sentiment endpoint: $STATUS"
           [ "$STATUS" = "InService" ] || exit 1
@@ -146,9 +146,9 @@ jobs:
 
       - name: Test sentiment inference
         run: |
-          PAYLOAD='{"inputs": "Customer is frustrated about repeated outages."}'
+          PAYLOAD='{"call_transcript": "Customer is frustrated about repeated outages."}'
           aws sagemaker-runtime invoke-endpoint \
-            --endpoint-name retention-sentiment-analysis-endpoint \
+            --endpoint-name retention-sentiment-revised-endpoint \
             --content-type application/json \
             --body "$PAYLOAD" \
             /tmp/sentiment-out.json
@@ -183,7 +183,7 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             ALL_UP=true
-            for url in http://localhost:8080/health http://localhost:8001/health http://localhost:8000/health; do
+            for url in http://localhost:8080/health http://localhost:8001/health http://localhost:8002/health; do
               curl -sf "$url" > /dev/null 2>&1 || ALL_UP=false
             done
             if $ALL_UP; then
