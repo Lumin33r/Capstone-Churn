@@ -28,12 +28,12 @@ resource "aws_eks_node_group" "retention_ng" {
   subnet_ids      = local.eks_subnet_ids
 
   scaling_config {
-    desired_size = 2
-    max_size     = 4
-    min_size     = 1
+    desired_size = 3
+    max_size     = 6
+    min_size     = 2
   }
 
-  instance_types = ["t3.medium"]
+  instance_types = ["t3.large"]
 
   depends_on = [
     aws_iam_role_policy_attachment.eks_node_AmazonEKSWorkerNodePolicy,

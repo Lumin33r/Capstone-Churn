@@ -125,7 +125,58 @@ jobs:
         if: inputs.scope == 'all' || inputs.scope == 'kubernetes'
         run: |
           echo "Deleting retention-engine namespace and all resources..."
-          kubectl delete namespace retention-engine --ignore-not-found --timeout=120s
+          kubectl delete all,configmap,secret,serviceaccount,ingress,pvc -n retention-engine --all --ignore-not-found || true
+
+          REMAINING_PODS=$(kubectl -n retention-engine get pods -o name 2>/dev/null || true)
+          if [ -n "$REMAINING_PODS" ]; then
+            echo "Force deleting stuck pods before namespace deletion..."
+            echo "$REMAINING_PODS" | xargs -r kubectl -n retention-engine delete --force --grace-period=0 --ignore-not-found
+          fi
+
+          if ! kubectl get namespace retention-engine >/dev/null 2>&1; then
+            echo "✅ Namespace already absent; treating teardown as successful"
+            kubectl delete ingressclass alb --ignore-not-found
+            echo "✅ Kubernetes resources deleted"
+            exit 0
+          fi
+
+          kubectl delete namespace retention-engine --ignore-not-found
+
+          for i in $(seq 1 30); do
+            if ! kubectl get namespace retention-engine >/dev/null 2>&1; then
+              echo "✅ Namespace no longer exists; treating teardown as successful"
+              kubectl delete ingressclass alb --ignore-not-found
+              echo "✅ Kubernetes resources deleted"
+              exit 0
+            fi
+
+            echo "[$i/30] Namespace still present — waiting 10s..."
+            sleep 10
+          done
+
+          echo "Namespace deletion timed out; attempting finalizer removal"
+          kubectl get namespace retention-engine -o yaml || true
+          kubectl get all -n retention-engine || true
+
+          kubectl patch namespace retention-engine --type=merge -p '{"spec":{"finalizers":[]}}' || true
+
+          for i in $(seq 1 12); do
+            if ! kubectl get namespace retention-engine >/dev/null 2>&1; then
+              echo "✅ Namespace no longer exists after finalizer removal; treating teardown as successful"
+              kubectl delete ingressclass alb --ignore-not-found
+              echo "✅ Kubernetes resources deleted"
+              exit 0
+            fi
+
+            echo "[$i/12] Namespace still present after finalizer removal — waiting 10s..."
+            sleep 10
+          done
+
+          echo "Namespace still stuck after finalizer removal"
+          kubectl get namespace retention-engine -o yaml || true
+          kubectl get all -n retention-engine || true
+          exit 1
+
           kubectl delete ingressclass alb --ignore-not-found
           echo "✅ Kubernetes resources deleted"
 
