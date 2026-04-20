@@ -30,6 +30,9 @@ spec:
           image: ghcr.io/lumin33r/agent-service:latest
           ports:
             - containerPort: 8080
+          env:
+            - name: FASTAPI_ROOT_PATH
+              value: /agent-api
           envFrom:
             - configMapRef:
                 name: agent-config

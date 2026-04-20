@@ -22,7 +22,10 @@ from typing import Any
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(name=__name__)
 
-app = FastAPI(title="Churn Predictor API")
+app = FastAPI(
+    title="Churn Predictor API",
+    root_path=os.getenv("FASTAPI_ROOT_PATH", ""),
+)
 
 app.add_middleware(
     middleware_class=CORSMiddleware,

@@ -27,7 +27,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Sentiment Analysis API")
+app = FastAPI(
+    title="Sentiment Analysis API",
+    root_path=os.getenv("FASTAPI_ROOT_PATH", ""),
+)
 
 app.add_middleware(
     CORSMiddleware,
