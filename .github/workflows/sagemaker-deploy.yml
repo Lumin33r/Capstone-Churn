@@ -1,9 +1,9 @@
 # .github/workflows/sagemaker-deploy.yml
-# Deploys and validates both SageMaker endpoints (churn XGBoost + sentiment DistilBERT)
+# Deploys the churn SageMaker endpoint and validates the external sentiment endpoint
 # Run AFTER terraform.yml has provisioned IAM roles and S3
 # See: CAPSTONE/docs/cicd-sagemaker-deploy.md
 
-name: 2 — SageMaker Endpoints
+name: 2 — SageMaker Validation
 
 on:
   push:
@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       endpoint:
-        description: "Which endpoint to deploy"
+        description: "Which endpoint to operate on"
         required: true
         type: choice
         options:
@@ -23,7 +23,7 @@ on:
           - sentiment
         default: both
       action:
-        description: "Deploy or delete"
+        description: "Deploy or delete managed endpoints"
         required: true
         type: choice
         options:
@@ -92,20 +92,11 @@ jobs:
           SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
           S3_BUCKET: ${{ secrets.S3_BUCKET }}
 
-      # ── Deploy Sentiment Endpoint ───────────────────────────────────
-      - name: Deploy Sentiment Endpoint
+      - name: External sentiment endpoint notice
         if: inputs.endpoint == 'both' || inputs.endpoint == 'sentiment'
-        working-directory: sagemaker/sentiment
         run: |
-          if [ "${{ inputs.action }}" = "delete" ]; then
-            python deploy.py --delete
-          else
-            python deploy.py
-          fi
-        env:
-          AWS_REGION: ${{ vars.AWS_REGION }}
-          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          echo "ℹ️ Sentiment endpoint is externally managed and validate-only in this workflow."
+          echo "ℹ️ Target endpoint: retention-sentiment-analysis-endpoint"
 
       # ── Health Checks ───────────────────────────────────────────────
       - name: Wait for Churn Endpoint
@@ -126,7 +117,7 @@ jobs:
       - name: Wait for Sentiment Endpoint
         if: inputs.action == 'deploy' && (inputs.endpoint == 'both' || inputs.endpoint == 'sentiment')
         run: |
-          ENDPOINT_NAME="retention-sentiment-revised-endpoint"
+          ENDPOINT_NAME="retention-sentiment-analysis-endpoint"
           for i in $(seq 1 30); do
             STATUS=$(aws sagemaker describe-endpoint \
               --endpoint-name "$ENDPOINT_NAME" \
@@ -155,7 +146,7 @@ jobs:
         run: |
           echo -n '{"call_transcript": "The customer expressed frustration about repeated billing errors."}' > /tmp/sentiment-payload.json
           aws sagemaker-runtime invoke-endpoint \
-            --endpoint-name retention-sentiment-revised-endpoint \
+            --endpoint-name retention-sentiment-analysis-endpoint \
             --content-type application/json \
             --body fileb:///tmp/sentiment-payload.json \
             /tmp/sentiment-response.json
@@ -168,6 +159,8 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- Action: \`${{ inputs.action }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Endpoint selection: \`${{ inputs.endpoint }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Sentiment endpoint mode: externally managed, validate-only" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Sentiment endpoint target: \`retention-sentiment-analysis-endpoint\`" >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ inputs.action }}" = "deploy" ] && kubectl get deployment aws-load-balancer-controller -n kube-system >/dev/null 2>&1; then
             echo "- AWS Load Balancer Controller: ready in \`kube-system\`" >> "$GITHUB_STEP_SUMMARY"
           fi

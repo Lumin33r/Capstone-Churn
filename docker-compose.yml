@@ -47,6 +47,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8002:8002"
+    environment:
+      - SENTIMENT_ENDPOINT_NAME=retention-sentiment-analysis-endpoint
     env_file:
       - .env
     healthcheck:

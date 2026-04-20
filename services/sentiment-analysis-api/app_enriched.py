@@ -42,7 +42,7 @@ app.add_middleware(
 # --- Config ---
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 SENTIMENT_ENDPOINT = os.getenv(
-    "SENTIMENT_ENDPOINT_NAME", "retention-sentiment-revised-endpoint"
+    "SENTIMENT_ENDPOINT_NAME", "retention-sentiment-analysis-endpoint"
 )
 
 sagemaker_runtime = boto3.client("sagemaker-runtime", region_name=AWS_REGION)
@@ -242,7 +242,10 @@ def call_sagemaker_sentiment(transcript: str) -> dict:
         )
         result = json.loads(response["Body"].read().decode())
 
-        # Parse the nested response format
+        # Parse the nested response format.
+        # Prefer the explicit sentiment label when present because the
+        # externally managed endpoint does not share the revised endpoint's
+        # integer-to-label mapping.
         if isinstance(result, list) and len(result) > 0:
             inner = result[0]
             if isinstance(inner, str):
@@ -250,13 +253,24 @@ def call_sagemaker_sentiment(transcript: str) -> dict:
                 if isinstance(inner, list):
                     inner = inner[0]
 
+            sentiment_label = inner.get("sentiment_label")
             sentiment_int = inner.get("sentiment", 1)
             confidence = inner.get("confidence", 0.5)
         else:
+            sentiment_label = None
             sentiment_int = 1
             confidence = 0.5
 
-        label = SENTIMENT_LABELS.get(sentiment_int, "Neutral")
+        if isinstance(sentiment_label, str) and sentiment_label.strip():
+            normalized_label = sentiment_label.strip().lower()
+            label = {
+                "negative": "Negative",
+                "neutral": "Neutral",
+                "positive": "Positive",
+            }.get(normalized_label, sentiment_label.title())
+        else:
+            label = SENTIMENT_LABELS.get(sentiment_int, "Neutral")
+
         return {"sentiment": label, "confidence": confidence}
 
     except Exception as e:
