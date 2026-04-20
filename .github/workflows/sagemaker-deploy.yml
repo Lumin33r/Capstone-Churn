@@ -106,7 +106,7 @@ jobs:
       - name: Wait for Sentiment Endpoint
         if: inputs.action == 'deploy' && (inputs.endpoint == 'both' || inputs.endpoint == 'sentiment')
         run: |
-          ENDPOINT_NAME="retention-sentiment-analysis-endpoint"
+          ENDPOINT_NAME="retention-sentiment-revised-endpoint"
           for i in $(seq 1 30); do
             STATUS=$(aws sagemaker describe-endpoint \
               --endpoint-name "$ENDPOINT_NAME" \
@@ -133,9 +133,9 @@ jobs:
       - name: Validate Sentiment Inference
         if: inputs.action == 'deploy' && (inputs.endpoint == 'both' || inputs.endpoint == 'sentiment')
         run: |
-          echo -n '{"inputs": "The customer expressed frustration about repeated billing errors."}' > /tmp/sentiment-payload.json
+          echo -n '{"call_transcript": "The customer expressed frustration about repeated billing errors."}' > /tmp/sentiment-payload.json
           aws sagemaker-runtime invoke-endpoint \
-            --endpoint-name retention-sentiment-analysis-endpoint \
+            --endpoint-name retention-sentiment-revised-endpoint \
             --content-type application/json \
             --body fileb:///tmp/sentiment-payload.json \
             /tmp/sentiment-response.json
