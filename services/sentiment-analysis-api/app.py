@@ -229,11 +229,12 @@ def analyze_sentiment(req: CallRecord | dict, input: str | None = None) -> dict[
         logger.exception(msg="Sagemaker invocation failed")
         return {"error": str(object=e), "status": "failure"}
 
-with open(file=os.path.join(os.path.dirname(__file__), "call_transcripts.csv")) as f:
-    csv_file = csv.DictReader(f)
-    test_payload = next(csv_file)
+if __name__ == "__main__":
+    with open(file=os.path.join(os.path.dirname(__file__), "call_transcripts.csv")) as f:
+        csv_file = csv.DictReader(f)
+        test_payload = next(csv_file)
 
-print(analyze_sentiment(req=test_payload))
+    print(analyze_sentiment(req=test_payload))
 
 
 
