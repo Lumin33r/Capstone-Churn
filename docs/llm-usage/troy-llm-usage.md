@@ -1,7 +1,7 @@
 # LLM Usage Log — Troy
 
 **Tool:** GitHub Copilot (Claude Opus 4.6, VS Code Chat)
-**Period:** April 7–11, 2026
+**Period:** April 7–20, 2026
 
 ---
 
@@ -1015,3 +1015,139 @@ All 3 port references in `sentiment-predictor-deployment.yaml` were wrong:
 
 **Cluster operations:**
 - Applied updated deployment directly to cluster for immediate effect
+
+---
+
+## Session 4 — April 20, 2026
+
+### 53. Stale Branch Cleanup — Pruning Merged Branches
+
+**What I asked:** Identify all GitHub Actions workflows appearing in the Actions tab (ci-backend, ci-frontend, ci-ml-wrappers, Copilot cloud agent, Copilot code review) and trace which branches contain them.
+
+**LLM analysis:**
+- Scanned all 30 remote branches for `.github/workflows/ci-*` files
+- Found `ci-backend.yml`, `ci-frontend.yml`, `ci-ml-wrappers.yml` existed on ~12 branches (mostly `feat/kathleen-*`, `infra/*`, `troy/pr-events`) — all **0 bytes** (empty placeholder files)
+- Identified "Copilot cloud agent" and "Copilot code review" as built-in GitHub features, not workflow files
+- Tagged every branch with its last commit date and merge-to-main date
+
+**LLM actions:** Generated individual `git push origin --delete` commands grouped by merge date, allowing selective deletion. I ran them manually, keeping `main`, `feat/kathleen-sentiment-fallback`, and `feat/update-model`.
+
+**Result:** Deleted 25 stale remote branches and 10 local branches. After `git fetch --prune`, only 5 remote branches remain.
+
+**My evaluation:** Thorough branch audit. The merge-date tagging was helpful for deciding which to delete — all were merged weeks ago. The one unmerged branch (`feat/kathleen-langgraph-docs`) was flagged for review before deletion.
+
+---
+
+### 54. Trace Stale CI Workflow Source — `feat/kathleen-langgraph-docs`
+
+**What I asked:** After cleanup, `ci-backend`, `ci-frontend`, `ci-ml-wrappers` still appeared in the Actions tab. Which remaining branch has them?
+
+**LLM analysis:** Scanned the 5 remaining remote branches — `feat/kathleen-langgraph-docs` was the only one with those files. It was never merged to main.
+
+**My evaluation:** Quick identification. Deleting this branch would remove the last source of those stale workflow entries.
+
+---
+
+### 55. Sentiment Integration — Branch Creation & Rebase
+
+**What I asked:** How to pull Kathleen's `feat/kathleen-sentiment-fallback` branch, fix the CI/CD gaps, and push as a new branch.
+
+**LLM output:** Guided through the workflow:
+1. `git checkout origin/feat/kathleen-sentiment-fallback -b feat/sentiment-fallback-integration` — create new local branch from her branch
+2. Explained rebase vs merge — rebase replays commits on top of latest main for a clean linear history
+3. Ran `git checkout main && git pull && git checkout feat/sentiment-fallback-integration && git rebase main` to bring the branch current
+
+**My evaluation:** Clean branch workflow. Rebase was the right choice here — the branch will be PR'd to main, so a linear history is preferred.
+
+---
+
+### 56. Sentiment Integration — Audit & Gap Analysis
+
+**What I asked:** Check what SageMaker endpoint Kathleen's new model uses and whether it's fully integrated across the codebase.
+
+**LLM analysis:** Read `app_enriched.py`, `sentiment_tool.py`, `docker-compose.yml`, `deploy.py`, `ci-post-merge.yml`, and `Dockerfile` across the branch. Produced a full integration matrix:
+
+| Component | Status | Issue |
+|---|---|---|
+| `app_enriched.py` | Correct | Calls `retention-sentiment-revised-endpoint` |
+| `Dockerfile` | Correct | Runs `app_enriched:app` on port 8002 |
+| `docker-compose.yml` | Correct | Maps port 8002, sets `SENTIMENT_URL` |
+| `sentiment_tool.py` | Correct | Reads `SENTIMENT_URL`, calls `/predict` |
+| `ci-post-merge.yml` | **Stale** | References old endpoint + port 8000 |
+| `deploy.py` | **Stale** | `ENDPOINT_NAME` still set to old name |
+| `app.py` | **Dead code** | Old service file, Dockerfile doesn't use it |
+
+**My evaluation:** Comprehensive audit. The runtime path was correctly wired, but CI/CD and deployment scripts were stale — exactly the kind of gap that causes post-merge failures.
+
+---
+
+### 57. Fix CI/CD & Deploy Script for New Endpoint
+
+**What I asked:** Fix the three integration gaps identified in the audit.
+
+**LLM fixes (3 files, applied via multi-replace):**
+
+**A. `ci-post-merge.yml`:**
+- Endpoint health check: `retention-sentiment-analysis-endpoint` → `retention-sentiment-revised-endpoint`
+- Inference test: same endpoint rename + payload `{"inputs": ...}` → `{"call_transcript": ...}` to match `app_enriched.py`'s expected format
+- E2E health check URL: `localhost:8000` → `localhost:8002`
+
+**B. `sagemaker/sentiment/deploy.py`:**
+- `ENDPOINT_NAME` → `retention-sentiment-revised-endpoint`
+- `MODEL_NAME` → `retention-sentiment-revised-model`
+- `ENDPOINT_CONFIG_NAME` → `retention-sentiment-revised-config`
+
+**C. `services/sentiment-analysis-api/app.py`:**
+- Renamed to `app_legacy.py` — preserved as reference but no longer active
+
+**My evaluation:** All three fixes are correct and minimal. The payload format change (`inputs` → `call_transcript`) was particularly important — the old format would have caused a 422 from the new endpoint.
+
+---
+
+### 58. Fix K8s Manifests — Port Mismatch Causing Stuck Rollout
+
+**What I asked:** `deploy.yml` deploy-to-eks showed `sentiment-predictor` stuck at "1 old replicas are pending termination" — rollout never completing.
+
+**LLM analysis:** Immediately identified the root cause from the rollout log — K8s probes were hitting port 8001 but the new Dockerfile listens on 8002. Found all stale references:
+
+| File | Setting | Had | Should be |
+|---|---|---|---|
+| `sentiment-predictor-deployment.yaml` | containerPort | 8001 | 8002 |
+| `sentiment-predictor-deployment.yaml` | readinessProbe.port | 8001 | 8002 |
+| `sentiment-predictor-deployment.yaml` | livenessProbe.port | 8001 | 8002 |
+| `sentiment-predictor-service.yaml` | port/targetPort | 8001 | 8002 |
+| `agent-config.yaml` | SENTIMENT_PREDICTOR_URL | `...:8001` | `SENTIMENT_URL: ...:8002` |
+
+**LLM fix:** Updated all 3 K8s manifests in one multi-replace operation. Also fixed the config map env var name from `SENTIMENT_PREDICTOR_URL` to `SENTIMENT_URL` to match what `sentiment_tool.py` reads.
+
+**My evaluation:** This was the same class of bug as Task 52 (port mismatch in K8s probes) — but this time with the new port 8002 from Kathleen's Dockerfile change. The config map env var rename was a bonus catch that would have caused a separate runtime failure.
+
+---
+
+## Instances Where I Provided Guidance (Session 4)
+
+### 10. Selective Branch Deletion
+
+**Situation:** The LLM generated delete commands for all 29 non-main branches.
+**My decision:** Kept `feat/kathleen-sentiment-fallback` and `feat/update-model` as specified. Ran deletes individually so I could skip any I wanted to keep.
+
+### 11. Branch Strategy — New Branch from Teammate's Work
+
+**Situation:** Needed to fix gaps in Kathleen's branch without modifying her branch directly.
+**My decision:** Created `feat/sentiment-fallback-integration` from her branch, rebased onto main, applied fixes, and pushed as a new branch for PR. This preserves her branch as-is and creates a clean audit trail.
+
+---
+
+## Running List of Changes (Session 4 — April 20, 2026)
+
+| Commit | File(s) | Change |
+|--------|---------|--------|
+| `2b75112` | `.github/workflows/ci-post-merge.yml`, `sagemaker/sentiment/deploy.py`, `services/sentiment-analysis-api/app.py` → `app_legacy.py` | Align CI/CD and deploy script with new `retention-sentiment-revised-endpoint`; rename old app.py |
+| `1190275` | `k8s/deployments/sentiment-predictor-deployment.yaml`, `k8s/services/sentiment-predictor-service.yaml`, `k8s/configmaps/agent-config.yaml` | Update K8s manifests: port 8001 → 8002, fix config map env var name |
+
+**Branch operations:**
+- Deleted 25 stale remote branches (all previously merged to main)
+- Deleted 10 stale local branches
+- Created `feat/sentiment-fallback-integration` from `origin/feat/kathleen-sentiment-fallback`
+- Rebased onto latest main
+- Pushed to origin for PR
