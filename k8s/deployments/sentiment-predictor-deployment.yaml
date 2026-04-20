@@ -27,21 +27,21 @@ spec:
         - name: sentiment-predictor
           image: ghcr.io/lumin33r/sentiment-predictor:latest
           ports:
-            - containerPort: 8001
+            - containerPort: 8002
           envFrom:
             - secretRef:
                 name: aws-secrets
           readinessProbe:
             httpGet:
               path: /health
-              port: 8001
+              port: 8002
             initialDelaySeconds: 15
             periodSeconds: 5
             failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
-              port: 8001
+              port: 8002
             initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 3

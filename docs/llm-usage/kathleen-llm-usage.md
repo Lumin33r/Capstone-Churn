@@ -1,7 +1,7 @@
 # LLM Usage Log — Kathleen
 
 **Tool:** Claude Code (Claude Opus 4.6, CLI + VS Code extension)
-**Period:** March 30 – April 11, 2026
+**Period:** March 30 – April 19, 2026
 
 ---
 
@@ -357,3 +357,98 @@ Used Claude Code as a pair programming partner throughout the capstone project. 
 - Set up LangSmith from Day 1 — would have caught the action selection issue much earlier
 - Establish single-owner-per-resource rule for infrastructure from Day 1 — would have prevented the Terraform/deploy.py endpoint conflict
 - Build the Transcribe pipeline earlier — it's independent of other work and adds AWS service breadth for the rubric
+
+---
+
+## Session 4 Work (April 12–19, 2026)
+
+### Bedrock Guardrail Tuning
+- Initially attached the existing `sentiment-analysis-guardrail` to the LangGraph Bedrock calls
+- Found it blocked legitimate retention output — words like "cancel," "frustrated," and "churn" triggered the MISCONDUCT and INSULTS filters
+- **My analysis:** The guardrail was tuned for transcript input filtering, not agent output. A retention engine MUST discuss frustrated customers and cancellation threats — that's the entire use case.
+- **Decision:** Created a new `retention-engine-guardrail` with tuned filters: HATE/SEXUAL kept HIGH, MISCONDUCT and INSULTS lowered to NONE on output, PII switched from BLOCK to ANONYMIZE for email/phone (BLOCK kept for SSN/cards)
+- **Architectural decision:** Attached the guardrail only to the Gatherer LLM (input protection), not the Strategist LLM (which generates retention recommendations). Created a second `llm_strategist` instance without the guardrail.
+- **Rubric framing for presentation:** "We deployed a Bedrock Guardrail, tested it, and made an informed decision about placement based on the use case." Stronger answer than just "we added a guardrail."
+
+### Sentiment Service Enrichment Layer
+- The upstream sentiment SageMaker endpoint returned inconsistent classifications and `qa_score = 0` for all transcripts
+- **My decision:** Build an enriched FastAPI wrapper (`app_enriched.py`) that calls the SageMaker endpoint for base sentiment, then computes the remaining 6 fields via NLP post-processing
+- **Approach:** Keyword-based emotion scoring (frustration, anger, joy), sentiment_shift via first-half vs second-half text comparison, escalation/resolution detection via phrase matching, composite qa_score formula
+- **My guidance:** Asked Claude to make the qa_score start at a baseline of 5.0 and adjust up/down rather than start at 0 and only add — this avoids the trap where every transcript scores 0 because positive contributions are rare
+- **Outcome:** Returns all 7 fields the churn predictor needs, in the correct ranges (qa_score 0-10, emotions 0-1, flags as bool)
+
+### Sentiment Model Retraining (Stretch)
+- Created `sentiment_revision.ipynb` to retrain DistilBERT as a 3-class classifier (Negative/Neutral/Positive) instead of the original 6-class model
+- Trained on Google Colab with T4 GPU
+- Improved metrics: accuracy 43.8% → 58.4%, F1 macro 25.2% → 52.3%
+- **My decision:** Use this revised model for the demo path while the main team continued iterating on their version
+- **Critical evaluation:** The model is still weak (58% accuracy) because the dataset is only 2,500 samples. Hyperparameter tuning would yield diminishing returns — the data size is the bottleneck, not the model configuration. Pushed back when Claude suggested a 20-trial Optuna search.
+
+### Transcript-Aware Workflow
+- Built end-to-end transcript flow: Transcribe tab uploads audio with customer ID → S3 stores under `audio/{customer_id}/` → Lambda triggers Transcribe job → output saved to `transcripts/{customer_id}/`
+- Added `get_transcripts` LangChain tool so the agent can pull historical transcripts for any customer
+- Added saved-transcript dropdown to the Analyze tab — selecting a customer auto-fetches their transcripts from S3, eliminating copy/paste
+- **My observation:** The Chat tab's "default" session_id meant all conversations shared MemorySaver state. Identified the issue when customer IDs from prior conversations leaked into general questions. Removed hardcoded customer IDs from tool docstrings to prevent the LLM from referencing specific examples.
+
+### LangGraph Strategist Routing
+- Initially the Gatherer was generating both summaries AND recommendations, making the Strategist redundant
+- **My guidance:** Strengthened the Gatherer prompt to be strictly factual — "DO NOT recommend actions, DO NOT suggest retention strategies. The Retention Strategist will handle recommendations."
+- **Bug found:** The Strategist node wasn't returning content even though it ran. Traced it to the guardrail blocking the Strategist's output. Fixed by giving the Strategist its own LLM instance without the guardrail.
+- Added explicit `run_name` parameters to LLM invocations so LangSmith traces clearly label "DataGatherer", "DataGatherer-ReviewTools", and "RetentionStrategist" as distinct runs
+
+### Architecture Diagram for Presentation
+- Iteratively refined an architecture diagram for the team presentation
+- Used color-coded edges (HTTP, boto3, Bedrock API, S3 events) to reduce visual clutter from labeling every arrow
+- Distinguished what runs in K8s (our containerized services) vs managed AWS services (SageMaker, Bedrock, S3, Lambda)
+- **My judgment call:** Showed SageMaker endpoints OUTSIDE the K8s boundary because they're AWS-managed. The FastAPI wrappers go inside the boundary because we deploy them as containers. Helped clarify the distinction between "our code" and "managed services."
+
+### Coordinating Multiple Concurrent PRs
+- Repeatedly hit conflicts where teammates' PRs deleted or overwrote each other's code
+- **My guidance:** Established the pattern of always pulling main before starting work, using fresh feature branches, and writing PR descriptions that listed exactly which files were touched and why
+- **Defensive backups:** Continued using `.backup/` to preserve critical files before any branch operation
+- **Tactical PR reviews:** When reviewing teammates' PRs, organized feedback into Blocking / Conflicts / Structural / Positive categories. Avoided line-by-line nitpicks; focused on what would break in production.
+
+### Switching to Fallback for End-to-End Demo
+- With days remaining and the upstream sentiment endpoint still inconsistent, made the decision to ship our enriched wrapper for the presentation
+- **My guidance:** Wrote the PR with explicit reversal instructions — if/when the upstream endpoint produces correct fields, switch the Dockerfile CMD back. This frames our wrapper as a fallback rather than a replacement.
+- Verified end-to-end: agent → 5 tools → strategist → recommendation, with all services running locally
+
+---
+
+## Instances Where I Provided Guidance — Session 4
+
+### 27. Tuning the Guardrail vs Removing It
+**Initial Claude suggestion:** Disable the guardrail because it blocks retention output.
+**My pushback:** "Can we adjust the guardrail for our use case?" — better than just removing it for the rubric.
+**Outcome:** Created a tuned guardrail with appropriate filter levels for our domain. Better presentation story.
+
+### 28. Strategist Output Was Empty
+**My observation:** Strategist node was firing per logs but returning no content.
+**Diagnosis:** The guardrail attached to the Strategist LLM was silently blocking the output containing retention terminology.
+**Outcome:** Created `llm_strategist` without guardrail, kept `llm` with guardrail for the Gatherer. Two LLM instances, different protection levels per role.
+
+### 29. Hyperparameter Tuning When Data Is the Bottleneck
+**Claude's suggestion:** 20-trial Optuna search across learning rate, batch size, weight decay, warmup ratio.
+**My pushback:** "How long would this take? With 2,500 samples, isn't tuning diminishing returns?"
+**Outcome:** Skipped the search. Used standard fine-tuning hyperparameters (lr=3e-5, batch=16, 8 epochs, warmup_ratio=0.1). Saved hours of training time.
+
+### 30. Architecture Diagram Boundaries
+**My question:** Should SageMaker endpoints be inside the K8s box or outside?
+**Claude's explanation:** Outside — SageMaker is AWS-managed, our FastAPI wrappers (which we deploy as containers) are inside K8s. The wrapper is the waiter, the SageMaker endpoint is the kitchen.
+**Outcome:** Diagram now correctly shows the deployment topology, which makes the architecture much clearer for non-technical reviewers.
+
+### 31. Sanitizing LLM Usage Docs
+**My guidance:** When updating docs, sanitize anything that reads as critical of teammates. Frame issues as "cross-PR conflicts" or "alignment issues" rather than naming individuals.
+**Outcome:** Maintained professional tone in docs that will be reviewed by the instructor and potentially shared.
+
+### 32. Demo Resilience
+**My decision:** When the upstream sentiment endpoint was still inconsistent days before the demo, I chose to switch to our enriched wrapper rather than wait. Better to demo a working pipeline than risk a broken live demo.
+**Framing:** Wrote the PR description with explicit revert instructions so this is positioned as a fallback, not a replacement.
+
+---
+
+### What I Would Do Differently (Session 4 additions)
+- Tune the guardrail filters during initial setup, not after discovering they block legitimate output
+- Build the enriched wrapper from the start instead of waiting for the upstream endpoint
+- Establish role-specific LLM instances earlier — having one `llm` shared across all nodes made it harder to attach different guardrails or configurations per role
+- Color-code architecture diagrams from the first draft — much easier to read than text-labeled arrows

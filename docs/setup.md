@@ -412,6 +412,8 @@ If the namespace quota is exceeded, scale down other deployments first.
 
 ## 8. Architecture Overview
 
+![System Architecture](architecture_final.png)
+
     Frontend (React) — port 3000
          |
          | HTTP
