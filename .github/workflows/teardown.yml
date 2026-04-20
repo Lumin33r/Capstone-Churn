@@ -135,10 +135,17 @@ jobs:
 
           kubectl delete namespace retention-engine --ignore-not-found
           kubectl wait --for=delete namespace/retention-engine --timeout=300s || {
-            echo "Namespace deletion timed out; dumping remaining resources for debugging"
+            echo "Namespace deletion timed out; attempting finalizer removal"
             kubectl get namespace retention-engine -o yaml || true
             kubectl get all -n retention-engine || true
-            exit 1
+
+            kubectl patch namespace retention-engine --type=merge -p '{"spec":{"finalizers":[]}}' || true
+            kubectl wait --for=delete namespace/retention-engine --timeout=120s || {
+              echo "Namespace still stuck after finalizer removal"
+              kubectl get namespace retention-engine -o yaml || true
+              kubectl get all -n retention-engine || true
+              exit 1
+            }
           }
 
           kubectl delete ingressclass alb --ignore-not-found
