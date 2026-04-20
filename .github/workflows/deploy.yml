@@ -142,6 +142,28 @@ jobs:
             fi
           done
 
+      - name: Preflight cluster capacity
+        run: |
+          READY_NODES=$(kubectl get nodes --no-headers 2>/dev/null | awk '$2 == "Ready" {count++} END {print count+0}')
+          NOT_READY_NODES=$(kubectl get nodes --no-headers 2>/dev/null | awk '$2 != "Ready" {count++} END {print count+0}')
+          PENDING_PODS=$(kubectl -n retention-engine get pods --no-headers 2>/dev/null | awk '$3 == "Pending" {count++} END {print count+0}')
+
+          echo "Ready nodes: $READY_NODES"
+          echo "NotReady nodes: $NOT_READY_NODES"
+          echo "Pending pods in retention-engine: $PENDING_PODS"
+
+          if [ "$READY_NODES" -lt 3 ]; then
+            echo "❌ Insufficient Ready nodes for safe rollout. Need at least 3 Ready nodes before restarting deployments."
+            kubectl get nodes
+            exit 1
+          fi
+
+          if [ "$PENDING_PODS" -gt 0 ]; then
+            echo "❌ Cluster already has Pending pods in retention-engine. Refusing to start rollout while capacity is constrained."
+            kubectl -n retention-engine get pods
+            exit 1
+          fi
+
       - name: Roll out deployments sequentially
         run: |
           for dep in agent-service churn-predictor sentiment-predictor frontend-deployment; do
