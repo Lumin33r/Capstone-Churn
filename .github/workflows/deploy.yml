@@ -101,10 +101,18 @@ jobs:
       - name: Setup kubectl
         uses: azure/setup-kubectl@v3
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
       - name: Write kubeconfig
         run: |
           mkdir -p $HOME/.kube
           echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+
+      - name: Ensure ALB Controller Ready
+        run: |
+          export AWS_REGION="${{ vars.AWS_REGION }}"
+          bash ./scripts/ensure_alb_controller.sh
 
       - name: Apply K8s manifests
         run: |
@@ -173,50 +181,74 @@ jobs:
             kubectl rollout status deployment/$dep -n retention-engine --timeout=300s
           done
 
-      - name: Smoke test agent health
+      - name: Wait for public ALB
+        id: alb
         run: |
-          ALB_URL=$(kubectl get ingress retention-engine-ingress -n retention-engine \
-            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
-          echo "ALB URL: $ALB_URL"
-          if [ -z "$ALB_URL" ]; then
-            echo "⚠️ No ALB hostname assigned yet — skipping smoke test"
-            echo "The ALB may take 2-3 minutes to provision"
-            kubectl get ingress -n retention-engine
-            exit 0
-          fi
-          # Wait for DNS to resolve (new ALBs can take 1-3 min)
-          echo "Waiting for ALB DNS to resolve..."
-          for i in $(seq 1 18); do
-            if nslookup "$ALB_URL" >/dev/null 2>&1; then
-              echo "DNS resolved after $((i * 10))s"
+          for i in $(seq 1 36); do
+            ALB_URL=$(kubectl get ingress retention-engine-ingress -n retention-engine \
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+            if [ -n "$ALB_URL" ]; then
+              echo "hostname=$ALB_URL" >> "$GITHUB_OUTPUT"
+              echo "ALB hostname assigned after $((i * 10))s: $ALB_URL"
               break
             fi
-            if [ "$i" -eq 18 ]; then
-              echo "⚠️ DNS not resolving after 3 min — skipping smoke test"
-              exit 0
-            fi
+            echo "[$i/36] Waiting for ALB hostname..."
             sleep 10
           done
-          curl -sf --retry 5 --retry-delay 10 --retry-all-errors "http://${ALB_URL}/health"
-          echo "✅ Agent service is healthy via ALB"
+
+          if [ -z "${ALB_URL:-}" ]; then
+            echo "❌ Timed out waiting for ALB hostname"
+            kubectl describe ingress retention-engine-ingress -n retention-engine
+            exit 1
+          fi
+
+          for i in $(seq 1 24); do
+            if nslookup "$ALB_URL" >/dev/null 2>&1; then
+              echo "DNS resolved after $((i * 10))s"
+              exit 0
+            fi
+            echo "[$i/24] Waiting for ALB DNS propagation..."
+            sleep 10
+          done
+
+          echo "❌ ALB hostname assigned but DNS did not resolve in time"
+          exit 1
+
+      - name: Smoke test public routes
+        run: |
+          BASE_URL="http://${{ steps.alb.outputs.hostname }}"
+          curl -sf --retry 5 --retry-delay 10 --retry-all-errors "$BASE_URL/health" >/dev/null
+          curl -sf --retry 5 --retry-delay 10 --retry-all-errors "$BASE_URL/agent-api/health" >/dev/null
+          curl -sf --retry 5 --retry-delay 10 --retry-all-errors "$BASE_URL/churn-api/health" >/dev/null
+          curl -sf --retry 5 --retry-delay 10 --retry-all-errors "$BASE_URL/sentiment-api/health" >/dev/null
+          curl -sf --retry 5 --retry-delay 10 --retry-all-errors "$BASE_URL/agent-api/docs" >/dev/null
+          curl -sf --retry 5 --retry-delay 10 --retry-all-errors "$BASE_URL/churn-api/docs" >/dev/null
+          curl -sf --retry 5 --retry-delay 10 --retry-all-errors "$BASE_URL/sentiment-api/docs" >/dev/null
+          echo "✅ Public frontend and FastAPI routes are reachable via ALB"
 
       - name: Deployment Summary
         run: |
-          ALB_URL=$(kubectl get ingress retention-engine-ingress -n retention-engine \
-            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+          ALB_URL="${{ steps.alb.outputs.hostname }}"
           echo "## Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$ALB_URL" ]; then
-            echo "### ALB Endpoint" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Public Endpoints" >> "$GITHUB_STEP_SUMMARY"
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "| Route | URL |" >> "$GITHUB_STEP_SUMMARY"
             echo "|-------|-----|" >> "$GITHUB_STEP_SUMMARY"
             echo "| Frontend | http://${ALB_URL}/ |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Agent API | http://${ALB_URL}/agent-api/ |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Churn API | http://${ALB_URL}/churn-api/ |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Health | http://${ALB_URL}/health |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Frontend Health | http://${ALB_URL}/health |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Agent API Health | http://${ALB_URL}/agent-api/health |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Agent API Docs | http://${ALB_URL}/agent-api/docs |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Agent Chat | http://${ALB_URL}/agent-api/chat |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Churn API Health | http://${ALB_URL}/churn-api/health |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Churn API Docs | http://${ALB_URL}/churn-api/docs |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Churn High Risk | http://${ALB_URL}/churn-api/high-risk?limit=5 |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Sentiment API Health | http://${ALB_URL}/sentiment-api/health |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Sentiment API Docs | http://${ALB_URL}/sentiment-api/docs |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Sentiment Predict | http://${ALB_URL}/sentiment-api/predict |" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "⚠️ ALB not yet provisioned — check \`kubectl get ingress -n retention-engine\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "❌ ALB not yet provisioned — check \`kubectl describe ingress -n retention-engine retention-engine-ingress\`" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Tag:** \`${{ inputs.tag }}\`  " >> "$GITHUB_STEP_SUMMARY"

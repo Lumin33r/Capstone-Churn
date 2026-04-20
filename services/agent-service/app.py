@@ -2,6 +2,8 @@
 # FastAPI entry point for the LangChain agentic harness
 # Updated by Kathleen & Okino — passes customer_id to agent
 
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -10,7 +12,10 @@ import re
 
 load_dotenv()
 
-app = FastAPI(title="Retention Engine Agent Service")
+app = FastAPI(
+    title="Retention Engine Agent Service",
+    root_path=os.getenv("FASTAPI_ROOT_PATH", ""),
+)
 
 # --- Guardrails: approved retention actions by risk level ---
 APPROVED_ACTIONS = {

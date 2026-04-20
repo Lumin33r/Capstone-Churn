@@ -28,6 +28,9 @@ spec:
           image: ghcr.io/lumin33r/sentiment-predictor:latest
           ports:
             - containerPort: 8002
+          env:
+            - name: FASTAPI_ROOT_PATH
+              value: /sentiment-api
           envFrom:
             - secretRef:
                 name: aws-secrets
