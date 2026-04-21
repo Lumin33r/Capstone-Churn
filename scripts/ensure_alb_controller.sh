@@ -31,10 +31,11 @@ spec:
       targetPort: 80
   type: ClusterIP
 EOF
-      && kubectl apply --dry-run=server -f k8s/ingress.yaml >/dev/null 2>&1
       then
-        echo "✅ ALB webhook is ready"
-        return 0
+        if kubectl apply --dry-run=server -f k8s/ingress.yaml >/dev/null 2>&1; then
+          echo "✅ ALB webhook is ready"
+          return 0
+        fi
       fi
     fi
 
