@@ -125,12 +125,12 @@ jobs:
         if: inputs.scope == 'all' || inputs.scope == 'kubernetes'
         run: |
           echo "Deleting retention-engine namespace and all resources..."
-          kubectl delete all,configmap,secret,serviceaccount,ingress,pvc -n retention-engine --all --ignore-not-found || true
+            kubectl delete all,configmap,secret,serviceaccount,ingress,pvc -n retention-engine --all --ignore-not-found --wait=false || true
 
           REMAINING_PODS=$(kubectl -n retention-engine get pods -o name 2>/dev/null || true)
           if [ -n "$REMAINING_PODS" ]; then
             echo "Force deleting stuck pods before namespace deletion..."
-            echo "$REMAINING_PODS" | xargs -r kubectl -n retention-engine delete --force --grace-period=0 --ignore-not-found
+              echo "$REMAINING_PODS" | xargs -r kubectl -n retention-engine delete --force --grace-period=0 --ignore-not-found --wait=false
           fi
 
           if ! kubectl get namespace retention-engine >/dev/null 2>&1; then
@@ -140,7 +140,7 @@ jobs:
             exit 0
           fi
 
-          kubectl delete namespace retention-engine --ignore-not-found
+          kubectl delete namespace retention-engine --ignore-not-found --wait=false
 
           for i in $(seq 1 30); do
             if ! kubectl get namespace retention-engine >/dev/null 2>&1; then
