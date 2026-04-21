@@ -40,10 +40,41 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/lumin33r
+  EKS_CLUSTER_NAME: eks-ezvrmopo-okl
+  EKS_DEPLOY_NODEGROUP: retention-ng
 
 jobs:
+  # ── Fail Fast On Cluster/Auth Drift ───────────────────────────────
+  preflight-cluster:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+
+      - name: Validate node auth and target nodegroup capacity
+        run: |
+          bash ./scripts/check_eks_node_access.sh \
+            --cluster-name "$EKS_CLUSTER_NAME" \
+            --nodegroup "$EKS_DEPLOY_NODEGROUP" \
+            --min-ready 1
+
   # ── Build & Push Docker Images ────────────────────────────────────
   build-and-push:
+    needs: preflight-cluster
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -86,7 +117,7 @@ jobs:
 
   # ── Deploy to EKS ────────────────────────────────────────────────
   deploy-to-eks:
-    needs: build-and-push
+    needs: [preflight-cluster, build-and-push]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,8 +151,36 @@ jobs:
           kubectl apply -f k8s/namespace-quota.yaml
           kubectl apply -f k8s/configmaps/
           kubectl apply -f k8s/deployments/
-          kubectl apply -f k8s/services/
-          kubectl apply -f k8s/ingress.yaml
+
+          for attempt in 1 2 3; do
+            if kubectl apply -f k8s/services/; then
+              break
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "❌ Failed to apply services after 3 attempts"
+              exit 1
+            fi
+
+            echo "Service apply failed, re-checking ALB webhook readiness before retry $((attempt + 1))..."
+            export AWS_REGION="${{ vars.AWS_REGION }}"
+            bash ./scripts/ensure_alb_controller.sh
+          done
+
+          for attempt in 1 2 3; do
+            if kubectl apply -f k8s/ingress.yaml; then
+              break
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "❌ Failed to apply ingress after 3 attempts"
+              exit 1
+            fi
+
+            echo "Ingress apply failed, re-checking ALB webhook readiness before retry $((attempt + 1))..."
+            export AWS_REGION="${{ vars.AWS_REGION }}"
+            bash ./scripts/ensure_alb_controller.sh
+          done
 
       - name: Create secrets from GitHub secrets
         run: |
@@ -149,6 +208,13 @@ jobs:
               echo "$PODS" | xargs kubectl delete pod -n retention-engine --ignore-not-found
             fi
           done
+
+      - name: Re-check node auth and target nodegroup capacity
+        run: |
+          bash ./scripts/check_eks_node_access.sh \
+            --cluster-name "$EKS_CLUSTER_NAME" \
+            --nodegroup "$EKS_DEPLOY_NODEGROUP" \
+            --min-ready 3
 
       - name: Preflight cluster capacity
         run: |
