@@ -31,7 +31,7 @@ APPROVED_ACTIONS = {
 def validate_action(output: str, risk_level: str | None) -> str:
     """Check that the agent's recommended action is in the approved list.
     If not, append a warning and default to the safest action for that risk level."""
-    action_match = re.search(pattern=r"Action:\s*(\S+)", string=output)
+    action_match = re.search(pattern=r"Action:\s*\**\s*([A-Z_]+)", string=output)
     if not action_match or not risk_level:
         return output
 
@@ -91,7 +91,7 @@ async def chat(body: ChatRequest) -> ChatResponse:
         sentiment_match = re.search(pattern=r"Sentiment:\s*(Positive|Neutral|Negative)", string=output)
         churn_match    = re.search(pattern=r"([\d.]+)%", string=output)
         risk_match     = re.search(pattern=r"Churn Risk:\s*(LOW|MEDIUM|HIGH)", string=output)
-        rec_match      = re.search(pattern=r"Recommendation:\s*(.+?)(?:\n|$)", string=output)
+        rec_match      = re.search(pattern=r"(?:Recommendation|Justification):\s*\**\s*(.+?)(?:\n|$)", string=output)
         cid_match      = re.search(pattern=r"Customer ID:\s*(C\d+)", string=output)
 
         # Guardrail: validate the recommended action
