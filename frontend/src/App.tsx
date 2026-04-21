@@ -278,7 +278,10 @@ function AnalyzeTab() {
 
   async function loadSavedTranscript(name: string) {
     try {
-      const res = await fetch(`${CHURN_API_URL}/transcripts/${name}`);
+      const url = customerId
+        ? `${CHURN_API_URL}/transcripts/${name}?customer_id=${encodeURIComponent(customerId)}`
+        : `${CHURN_API_URL}/transcripts/${name}`;
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         setTranscript(data.transcript || "");
@@ -595,6 +598,7 @@ interface TranscriptMeta {
   key: string;
   size: number;
   last_modified: string;
+  customer_id: string | null;
 }
 
 interface TranscriptDetail {
@@ -658,10 +662,13 @@ function TranscribeTab() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
-  async function viewTranscript(name: string) {
+  async function viewTranscript(name: string, cid?: string | null) {
     setLoadingTranscript(true); setSelectedTranscript(null);
     try {
-      const res = await fetch(`${CHURN_API_URL}/transcripts/${name}`);
+      const url = cid
+        ? `${CHURN_API_URL}/transcripts/${name}?customer_id=${encodeURIComponent(cid)}`
+        : `${CHURN_API_URL}/transcripts/${name}`;
+      const res = await fetch(url);
       if (res.ok) setSelectedTranscript(await res.json());
       else setError("Could not load transcript");
     } catch {
@@ -735,7 +742,7 @@ function TranscribeTab() {
               {transcripts.map((t) => (
                 <li
                   key={t.key}
-                  onClick={() => viewTranscript(t.name)}
+                  onClick={() => viewTranscript(t.name, t.customer_id)}
                   className={`p-3 rounded-lg border cursor-pointer transition-all hover:border-trilink-light ${
                     selectedTranscript?.filename === t.name
                       ? "border-trilink-light bg-trilink-light/5"
