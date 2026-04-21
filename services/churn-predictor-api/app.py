@@ -444,17 +444,29 @@ def list_transcripts(customer_id: str | None = None):
 
 
 @app.get("/transcripts/{filename}")
-def get_transcript(filename: str):
-    """Retrieve a specific transcript and return the text + speaker segments."""
-    s3_key = f"transcripts/{filename}.json"
+def get_transcript(filename: str, customer_id: str | None = None):
+    """Retrieve a specific transcript and return the text + speaker segments.
+    If customer_id is provided, looks up transcripts/{customer_id}/{filename}.json.
+    Otherwise falls back to transcripts/{filename}.json (legacy path)."""
+    if customer_id:
+        s3_key = f"transcripts/{customer_id}/{filename}.json"
+    else:
+        s3_key = f"transcripts/{filename}.json"
     try:
         obj = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
         result = json.loads(obj["Body"].read().decode())
 
-        full_text = result["results"]["transcripts"][0]["transcript"]
+        # Handle two formats:
+        #   Transcribe output: {"results": {"transcripts": [...], "items": [...]}}
+        #   Manually saved:    {"transcript": "...", "customer_id": "...", ...}
+        if "results" in result:
+            full_text = result["results"]["transcripts"][0]["transcript"]
+            items = result["results"].get("items", [])
+        else:
+            full_text = result.get("transcript", "")
+            items = []
 
         segments = []
-        items = result["results"].get("items", [])
         if items and items[0].get("speaker_label"):
             current_speaker = None
             current_words = []
