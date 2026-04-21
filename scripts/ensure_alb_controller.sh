@@ -6,15 +6,17 @@ wait_for_webhook() {
   local attempts=${1:-24}
   local sleep_seconds=${2:-5}
   local secret_ca=""
-  local webhook_ca=""
+  local mutating_webhook_ca=""
+  local validating_webhook_ca=""
 
   echo "Waiting for ALB webhook TLS and admission readiness..."
 
   for ((i=1; i<=attempts; i++)); do
     secret_ca=$(kubectl get secret aws-load-balancer-tls -n kube-system -o jsonpath='{.data.ca\.crt}' 2>/dev/null || true)
-    webhook_ca=$(kubectl get mutatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath='{.webhooks[2].clientConfig.caBundle}' 2>/dev/null || true)
+    mutating_webhook_ca=$(kubectl get mutatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath='{.webhooks[2].clientConfig.caBundle}' 2>/dev/null || true)
+    validating_webhook_ca=$(kubectl get validatingwebhookconfiguration aws-load-balancer-webhook -o jsonpath='{.webhooks[2].clientConfig.caBundle}' 2>/dev/null || true)
 
-    if [[ -n "$secret_ca" && -n "$webhook_ca" && "$secret_ca" == "$webhook_ca" ]]; then
+    if [[ -n "$secret_ca" && -n "$mutating_webhook_ca" && -n "$validating_webhook_ca" && "$secret_ca" == "$mutating_webhook_ca" && "$secret_ca" == "$validating_webhook_ca" ]]; then
       if cat <<'EOF' | kubectl apply --dry-run=server -f - >/dev/null 2>&1
 apiVersion: v1
 kind: Service
@@ -29,6 +31,7 @@ spec:
       targetPort: 80
   type: ClusterIP
 EOF
+      && kubectl apply --dry-run=server -f k8s/ingress.yaml >/dev/null 2>&1
       then
         echo "✅ ALB webhook is ready"
         return 0
@@ -42,6 +45,7 @@ EOF
   echo "ALB webhook did not become ready in time"
   kubectl get secret aws-load-balancer-tls -n kube-system -o yaml || true
   kubectl get mutatingwebhookconfiguration aws-load-balancer-webhook -o yaml || true
+  kubectl get validatingwebhookconfiguration aws-load-balancer-webhook -o yaml || true
   kubectl get deployment aws-load-balancer-controller -n kube-system -o yaml | sed -n '1,220p' || true
   exit 1
 }

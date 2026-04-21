@@ -136,7 +136,20 @@ jobs:
             bash ./scripts/ensure_alb_controller.sh
           done
 
-          kubectl apply -f k8s/ingress.yaml
+          for attempt in 1 2 3; do
+            if kubectl apply -f k8s/ingress.yaml; then
+              break
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "❌ Failed to apply ingress after 3 attempts"
+              exit 1
+            fi
+
+            echo "Ingress apply failed, re-checking ALB webhook readiness before retry $((attempt + 1))..."
+            export AWS_REGION="${{ vars.AWS_REGION }}"
+            bash ./scripts/ensure_alb_controller.sh
+          done
 
       - name: Create secrets from GitHub secrets
         run: |
