@@ -93,7 +93,12 @@ jobs:
       - name: Skip if not selected
         id: check
         run: |
-          if [[ "${{ inputs.service }}" != "all" && "${{ inputs.service }}" != "${{ matrix.name }}" ]]; then
+          # On push events, inputs.service is empty (only workflow_dispatch
+          # populates inputs). Default empty to "all" so auto-deploys from
+          # main rebuild every service rather than skipping the build step.
+          SVC="${{ inputs.service }}"
+          SVC="${SVC:-all}"
+          if [[ "$SVC" != "all" && "$SVC" != "${{ matrix.name }}" ]]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -113,7 +118,9 @@ jobs:
         with:
           context: ${{ matrix.context }}
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:${{ inputs.tag }}
+          # Same input-default issue as `service` above — inputs.tag is empty
+          # on push events and would produce a malformed `:` suffix.
+          tags: ${{ env.IMAGE_PREFIX }}/${{ matrix.name }}:${{ inputs.tag || 'latest' }}
 
   # ── Deploy to EKS ────────────────────────────────────────────────
   deploy-to-eks:
