@@ -2,6 +2,7 @@
 # LangGraph-based retention analysis pipeline
 # Replaces AgentExecutor with explicit state graph + conditional routing
 
+import logging
 import os
 from typing import TypedDict, Literal, Annotated
 from operator import add
@@ -11,6 +12,8 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
+
+logger = logging.getLogger(__name__)
 
 from tools.sentiment_tool import analyze_call
 from tools.churn_tool import predict_churn
@@ -334,23 +337,69 @@ def invoke_graph(user_message: str, customer_id: str | None = None, session_id: 
         if isinstance(msg, HumanMessage):
             last_human_idx = i
 
+    turn_messages = result["messages"][last_human_idx + 1:]
+    logger.info(
+        "[INVOKE_GRAPH] turn has %d messages after the last HumanMessage",
+        len(turn_messages),
+    )
+
     # Concatenate every substantive AI message from this turn.
     # The graph can produce multiple AIMessages per turn (Gatherer review +
     # Strategist), and either one may carry the substantive answer depending
     # on how Claude interprets the prompts. Returning only the last one drops
     # the table when the Strategist shortcuts to a CTA-only follow-up.
     chunks: list[str] = []
-    for msg in result["messages"][last_human_idx + 1:]:
-        if not isinstance(msg, AIMessage):
+    for i, msg in enumerate(turn_messages):
+        msg_type = type(msg).__name__
+        is_ai = isinstance(msg, AIMessage)
+        has_tool_calls = bool(getattr(msg, "tool_calls", None))
+        text = _extract_text(getattr(msg, "content", None)).strip()
+        logger.info(
+            "[INVOKE_GRAPH]   msg[%d] type=%s ai=%s tool_calls=%s text_len=%d preview=%r",
+            i, msg_type, is_ai, has_tool_calls, len(text), text[:120],
+        )
+        if not is_ai:
             continue
-        if not msg.content:
+        if has_tool_calls:
             continue
-        # Skip messages whose only purpose is to invoke a tool
-        if getattr(msg, "tool_calls", None):
+        if not text:
             continue
-        chunks.append(msg.content)
+        chunks.append(text)
+
+    logger.info("[INVOKE_GRAPH] returning %d chunks", len(chunks))
 
     if chunks:
         return "\n\n".join(chunks)
 
     return "I wasn't able to process that request. Please try again."
+
+
+def _extract_text(content) -> str:
+    """Normalize AIMessage.content to a plain string.
+
+    Bedrock can return content as either a string or a list of content blocks
+    (each may be a dict with key 'text', or an SDK object exposing .text).
+    The default truthiness check on the raw value misclassifies a list of
+    empty/whitespace blocks as substantive, which leaks an empty chunk into
+    the join and produces a leading double-newline in the returned response.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                if "text" in block:
+                    parts.append(str(block.get("text") or ""))
+                elif block.get("type") == "text" and "value" in block:
+                    parts.append(str(block.get("value") or ""))
+            else:
+                text_attr = getattr(block, "text", None)
+                if text_attr is not None:
+                    parts.append(str(text_attr))
+        return "".join(parts)
+    return str(content)
