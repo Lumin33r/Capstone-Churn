@@ -327,9 +327,30 @@ def invoke_graph(user_message: str, customer_id: str | None = None, session_id: 
     config = {"configurable": {"thread_id": session_id}}
     result = graph.invoke(initial_state, config=config)
 
-    # Extract the last AI message
-    for msg in reversed(result["messages"]):
-        if isinstance(msg, AIMessage) and msg.content:
-            return msg.content
+    # MemorySaver keeps the entire session in result["messages"], so isolate
+    # this turn by slicing from the most recent HumanMessage forward.
+    last_human_idx = 0
+    for i, msg in enumerate(result["messages"]):
+        if isinstance(msg, HumanMessage):
+            last_human_idx = i
+
+    # Concatenate every substantive AI message from this turn.
+    # The graph can produce multiple AIMessages per turn (Gatherer review +
+    # Strategist), and either one may carry the substantive answer depending
+    # on how Claude interprets the prompts. Returning only the last one drops
+    # the table when the Strategist shortcuts to a CTA-only follow-up.
+    chunks: list[str] = []
+    for msg in result["messages"][last_human_idx + 1:]:
+        if not isinstance(msg, AIMessage):
+            continue
+        if not msg.content:
+            continue
+        # Skip messages whose only purpose is to invoke a tool
+        if getattr(msg, "tool_calls", None):
+            continue
+        chunks.append(msg.content)
+
+    if chunks:
+        return "\n\n".join(chunks)
 
     return "I wasn't able to process that request. Please try again."
