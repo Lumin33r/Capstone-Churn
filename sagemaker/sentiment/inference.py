@@ -16,6 +16,7 @@ from typing import Any, Dict, Tuple, Literal
 import torch.nn.functional as F
 import numpy as np
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
+# from happytransformer import HappyTextClassification 
 
 logger = logging.getLogger(name=__name__)
 logger.setLevel(level=logging.INFO)
@@ -410,10 +411,10 @@ def model_fn(model_dir: str) -> Any:
     
     try:
         logger.info(msg=f"[model_fn] Loading tokenizer from: {model_dir}")
-        tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path=model_dir)
+        tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path="ProsusAI/finbert")
 
         logger.info(msg=f"[model_fn] Loading model from: {model_dir}")
-        model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path=model_dir)
+        model = AutoModelForSequenceClassification.from_pretrained(pretrained_model_name_or_path="ProsusAI/finbert")
         model.to(DEVICE)
         model.eval()
     
@@ -509,9 +510,9 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
 
      
             sentiment_map = {
-              "0": "negative",
-              "1": "neutral",
-              "2": "positive",
+              "0": "positive",
+              "1": "negative",
+              "2": "neutral"
             }
 
             pred_idx = int(np.argmax(probs))
@@ -551,7 +552,7 @@ def predict_fn(inputs: Dict[str, Any], model) -> Dict[str, Any]:
                 text_features=text_features, 
                 escalated=esc, resolved=res
             )
-            
+            # happy_tc = HappyTextClassification("BERT", "ProsusAI/finbert", num_labels=3)
             # FINAL RESULT
             results.append({
                 "call_id": m.get("call_id"),
